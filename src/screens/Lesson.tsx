@@ -5,7 +5,9 @@ import { TIER_LABEL, weekPlan } from '../content/curriculum'
 import type { QuizQuestion, Task } from '../content/types'
 import { XP } from '../game/xp'
 import { isUnlocked, useStore } from '../store/useStore'
+import { useCallback } from 'react'
 import Celebration from '../components/Celebration'
+import ShellTask from '../components/ShellTask'
 import CodeBlock from '../components/CodeBlock'
 import { Button, Card, LinkButton, TrackPill } from '../components/ui'
 import { cx } from '../lib/cx'
@@ -23,14 +25,17 @@ function Paragraphs({ text }: { text: string }) {
   )
 }
 
-/** Task panel. Phase 1 ships the self-check shape; runners plug in here in phases 2 to 4 and paste checks in phase 6. */
-function TaskPanel({ task, onPass }: { task: Task; onPass: () => void }) {
+/** Task panel. Shell tasks run in the simulated terminal; python and sql runners arrive in phases 3 and 4, paste checks in phase 6. */
+function TaskPanel({ task, taskKey, onPassChange }: { task: Task; taskKey: string; onPassChange: (passed: boolean) => void }) {
   const [checks, setChecks] = useState<boolean[]>([])
+  useEffect(() => {
+    if (task.kind !== 'selfcheck' && task.kind !== 'shell') onPassChange(true)
+  }, [task, onPassChange])
+  if (task.kind === 'shell') return <ShellTask key={taskKey} task={task} onPassChange={onPassChange} />
   if (task.kind === 'selfcheck') {
-    const all = task.steps.every((_, i) => checks[i])
     return (
       <div className="space-y-3">
-        <p className="text-[15px]">{task.instructions}</p>
+        <p className="whitespace-pre-line text-[15px]">{task.instructions}</p>
         <ul className="space-y-2">
           {task.steps.map((s, i) => (
             <li key={i}>
@@ -39,14 +44,16 @@ function TaskPanel({ task, onPass }: { task: Task; onPass: () => void }) {
                   type="checkbox"
                   className="size-6 shrink-0 accent-[var(--c-accent)]"
                   checked={Boolean(checks[i])}
-                  onChange={(e) => setChecks((c) => { const n = [...c]; n[i] = e.target.checked; return n })}
+                  onChange={(e) => {
+                    const n = [...checks]; n[i] = e.target.checked; setChecks(n)
+                    onPassChange(task.steps.every((_, k) => n[k]))
+                  }}
                 />
                 <span className="text-sm">{s}</span>
               </label>
             </li>
           ))}
         </ul>
-        <Button onClick={onPass} disabled={!all} className="w-full">Done, continue</Button>
       </div>
     )
   }
@@ -54,8 +61,7 @@ function TaskPanel({ task, onPass }: { task: Task; onPass: () => void }) {
   return (
     <div className="space-y-3">
       <p className="text-[15px]">{'instructions' in task ? task.instructions : task.intro}</p>
-      <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted">This task needs {label}, which arrives in a later build phase.</div>
-      <Button onClick={onPass} className="w-full">Skip for now</Button>
+      <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted">This task needs {label}, which arrives in a later build phase. Continue to the quiz for now.</div>
     </div>
   )
 }
@@ -122,6 +128,9 @@ function LessonView({ id }: { id: string }) {
   const completeLesson = useStore((s) => s.completeLesson)
   const unlockLesson = useStore((s) => s.unlockLesson)
   const [step, setStep] = useState<Step>('concept')
+  const [taskPassed, setTaskPassed] = useState(false)
+  const onPassChange = useCallback((p: boolean) => setTaskPassed(p), [])
+  const awardBadge = useStore((s) => s.awardBadge)
   const [result, setResult] = useState<{ gained: number; weekDone: boolean; tierDone: boolean; correct: number } | null>(null)
 
   useEffect(() => { window.scrollTo({ top: 0 }) }, [])
@@ -151,6 +160,7 @@ function LessonView({ id }: { id: string }) {
 
   const finish = (correct: number) => {
     const r = completeLesson(lesson.id, correct, lesson.quiz.length)
+    if (lesson.badge) awardBadge(lesson.badge)
     setResult({ ...r, correct })
     setStep('done')
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -193,7 +203,7 @@ function LessonView({ id }: { id: string }) {
       {step === 'task' && (
         <Card>
           <h2 className="mb-3 font-display text-lg font-bold">Your turn</h2>
-          <TaskPanel task={lesson.task} onPass={() => (hasQuiz ? setStep('quiz') : finish(0))} />
+          <TaskPanel task={lesson.task} taskKey={lesson.id} onPassChange={onPassChange} />
         </Card>
       )}
 
@@ -219,12 +229,17 @@ function LessonView({ id }: { id: string }) {
       )}
 
       {/* Sticky, thumb-reachable action bar */}
-      {(step === 'concept' || step === 'done') && (
+      {(step === 'concept' || step === 'task' || step === 'done') && (
         <div className="fixed inset-x-0 bottom-[56px] z-30 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur md:static md:border-0 md:bg-transparent md:p-0">
           <div className="mx-auto flex max-w-3xl gap-2">
             {step === 'concept' && (
               <Button variant="track" className="w-full" onClick={() => setStep('task')}>
                 Continue to task
+              </Button>
+            )}
+            {step === 'task' && (
+              <Button variant="track" className="w-full" disabled={!taskPassed} onClick={() => (hasQuiz ? setStep('quiz') : finish(0))}>
+                {taskPassed ? (hasQuiz ? 'Continue to quick check' : 'Finish lesson') : 'Complete the task to continue'}
               </Button>
             )}
             {step === 'done' && (
@@ -242,7 +257,7 @@ function LessonView({ id }: { id: string }) {
           </div>
         </div>
       )}
-      {step === 'concept' && <div className="h-16 md:hidden" aria-hidden />}
+      {(step === 'concept' || step === 'task') && <div className="h-24 md:hidden" aria-hidden />}
     </div>
   )
 }

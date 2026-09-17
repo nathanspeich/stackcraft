@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { TIER_LABEL, weekPlan } from '../content/curriculum'
+import { TIER_LABEL, TIER_WEEKS, weekPlan } from '../content/curriculum'
 import { LESSONS } from '../content/lessons'
 import { effectiveStreak } from '../game/streak'
 import { today } from '../lib/dates'
@@ -17,6 +17,9 @@ export default function Home() {
   const due = dueCards(state)
   const doneCount = Object.keys(state.completed).length
   const tier = next?.tier ?? 3
+  const [tierFrom, tierTo] = TIER_WEEKS[tier]
+  const tierLessons = LESSONS.filter((l) => l.week >= tierFrom && l.week <= tierTo)
+  const tierDone = tierLessons.filter((l) => state.completed[l.id]).length
   const week = next ? weekPlan(next.week) : undefined
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
@@ -73,7 +76,7 @@ export default function Home() {
           <Link to="/map" className="inline-flex min-h-[44px] items-center px-2 -mr-2 text-sm font-semibold text-accent">Full map</Link>
         </div>
         <TierMap tier={tier} currentId={next?.id ?? null} />
-        <p className="mt-3 text-xs text-muted">{doneCount} of {LESSONS.length} lessons done</p>
+        <p className="mt-3 text-xs text-muted">{tierDone} of {tierLessons.length} {TIER_LABEL[tier]} lessons done</p>
       </Card>
     </div>
   )

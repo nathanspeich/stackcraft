@@ -12,16 +12,36 @@ export interface QuizQuestion {
 
 /** Result the in-app runner hands to a checker. */
 export interface RunResult {
-  /** Text the user typed or the final editor contents. */
+  /** The last command typed, or the final editor contents. */
   input: string
-  /** Everything printed to stdout (or the query result rendered as text). */
+  /** Output of the last run (stdout and stderr together, or the query result as text). */
   output: string
   /** Error text if the run failed. */
   error?: string
+  /** Every command run so far in this task, oldest first (shell lessons). */
+  history?: string[]
+  /** Output of every command run so far, aligned with history (shell lessons). */
+  outputs?: string[]
+  /** Snapshot of the simulated filesystem: path to content, or null for a directory. */
+  fs?: Record<string, string | null>
+  /** Current directory of the simulated shell. */
+  cwd?: string
+  /** Environment of the simulated shell. */
+  env?: Record<string, string>
+  /** Extra simulated state: processes, packages, crontab, and so on. */
+  state?: ShellState
   /** Rows returned by the SQL runner, when applicable. */
   rows?: Record<string, unknown>[]
-  /** Snapshot of the simulated filesystem for shell lessons. */
-  fs?: Record<string, string | null>
+}
+
+/** Simulated machine state the shell exposes to checkers. */
+export interface ShellState {
+  processes: { pid: number; user: string; cmd: string; cpu: number; mem: number }[]
+  packages: string[]
+  crontab: string
+  services: Record<string, 'active' | 'inactive' | 'failed'>
+  lastStatus: number
+  fileModes: Record<string, number>
 }
 
 export interface CheckResult {
@@ -33,9 +53,20 @@ export interface CheckResult {
 export interface InAppTask {
   kind: 'shell' | 'python' | 'sql'
   instructions: string
+  /** Starter code shown in the editor (python, sql) or written to `file` (shell). */
   starter?: string
-  /** Optional seed for the runner: shell files, SQL setup statements, etc. */
+  /** Shell lessons: path of a file to edit in the editor pane above the terminal. */
+  file?: string
+  /** Seed for the runner: shell files (path to content, trailing slash for a directory) or SQL setup. */
   seed?: Record<string, string>
+  /** Shell lessons: starting directory. Defaults to the home directory. */
+  cwd?: string
+  /** Shell lessons: extra machine state, such as processes or services. */
+  machine?: Partial<ShellState>
+  /** Short hints shown one at a time on request. */
+  hints?: string[]
+  /** Reference solution, used by tests and by the "show solution" link. */
+  solution?: { commands?: string[]; file?: string }
   check: (result: RunResult) => CheckResult
 }
 
@@ -81,6 +112,8 @@ export interface Lesson {
   example: { code: string; language: 'bash' | 'python' | 'sql' | 'text'; caption?: string }
   task: Task
   quiz: QuizQuestion[]
+  /** Badge awarded when the lesson is completed. */
+  badge?: string
   /** True for lessons whose content is written in a later build phase. */
   placeholder?: boolean
 }
