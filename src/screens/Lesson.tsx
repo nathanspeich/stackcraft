@@ -9,6 +9,7 @@ import { useCallback } from 'react'
 import Celebration from '../components/Celebration'
 import ShellTask from '../components/ShellTask'
 import PythonTask from '../components/PythonTask'
+import SqlTask from '../components/SqlTask'
 import CodeBlock from '../components/CodeBlock'
 import { Button, Card, LinkButton, TrackPill } from '../components/ui'
 import { cx } from '../lib/cx'
@@ -26,14 +27,15 @@ function Paragraphs({ text }: { text: string }) {
   )
 }
 
-/** Task panel. Shell tasks run in the simulated terminal, Python tasks in Pyodide; the sql runner arrives in phase 4, paste checks in phase 6. */
+/** Task panel. Shell tasks run in the simulated terminal, Python in Pyodide, SQL in sql.js; paste checks arrive in phase 6. */
 function TaskPanel({ task, taskKey, onPassChange }: { task: Task; taskKey: string; onPassChange: (passed: boolean) => void }) {
   const [checks, setChecks] = useState<boolean[]>([])
   useEffect(() => {
-    if (task.kind !== 'selfcheck' && task.kind !== 'shell' && task.kind !== 'python') onPassChange(true)
+    if (task.kind === 'real') onPassChange(true)
   }, [task, onPassChange])
   if (task.kind === 'shell') return <ShellTask key={taskKey} task={task} onPassChange={onPassChange} />
   if (task.kind === 'python') return <PythonTask key={taskKey} task={task} onPassChange={onPassChange} />
+  if (task.kind === 'sql') return <SqlTask key={taskKey} task={task} onPassChange={onPassChange} />
   if (task.kind === 'selfcheck') {
     return (
       <div className="space-y-3">
@@ -181,7 +183,7 @@ function LessonView({ id }: { id: string }) {
           <span className="text-xs text-muted">Week {lesson.week} · Day {lesson.day} · {TIER_LABEL[lesson.tier]}</span>
         </div>
         <h1 className="mt-2 font-display text-3xl font-extrabold leading-tight tracking-tight">{lesson.title}</h1>
-        {plan && <p className="text-sm text-muted">{plan.title}</p>}
+        {plan && <p className="text-sm text-muted">Week {lesson.week} theme: {plan.title}</p>}
         <ol className="mt-3 flex gap-1.5" aria-label="Lesson progress">
           {['Concept', 'Task', 'Quiz', 'Done'].map((label, i) => (
             <li key={label} className={cx('h-1.5 flex-1 rounded-full', i <= stepIdx ? 'bg-track' : 'bg-surface-2')} title={label} />
@@ -220,13 +222,16 @@ function LessonView({ id }: { id: string }) {
         <Card>
           <Celebration
             title={result.tierDone ? `Tier ${lesson.tier} complete!` : result.weekDone ? `Week ${lesson.week} complete!` : 'Lesson complete!'}
-            subtitle={result.gained > 0 ? `+${result.gained} XP` : 'Already completed, no extra XP'}
+            subtitle={result.gained > 0 ? `+${result.gained} XP total` : 'Already completed, no extra XP'}
           />
-          <ul className="mx-auto max-w-xs space-y-1 text-sm text-muted">
-            {hasQuiz && <li className="flex justify-between"><span>Quick check</span><span className="font-mono">{result.correct}/{lesson.quiz.length} · +{result.correct * XP.quizCorrect} XP</span></li>}
-            {result.weekDone && <li className="flex justify-between"><span>Week bonus</span><span className="font-mono">+{XP.weekBonus} XP</span></li>}
-            {result.tierDone && <li className="flex justify-between"><span>Tier bonus</span><span className="font-mono">+{XP.tierBonus} XP</span></li>}
-          </ul>
+          {result.gained > 0 && (
+            <ul className="mx-auto max-w-xs space-y-1 text-sm">
+              <li className="flex justify-between"><span>Lesson</span><span className="font-mono">+{lesson.task.kind === 'real' ? XP.realLesson : XP.lesson} XP</span></li>
+              {hasQuiz && <li className="flex justify-between"><span>Quick check {result.correct}/{lesson.quiz.length}</span><span className="font-mono">+{result.correct * XP.quizCorrect} XP</span></li>}
+              {result.weekDone && <li className="flex justify-between"><span>Week bonus</span><span className="font-mono">+{XP.weekBonus} XP</span></li>}
+              {result.tierDone && <li className="flex justify-between"><span>Tier bonus</span><span className="font-mono">+{XP.tierBonus} XP</span></li>}
+            </ul>
+          )}
         </Card>
       )}
 

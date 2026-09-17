@@ -42,7 +42,7 @@ export default function Home() {
             <span className="text-xs text-muted">Week {next.week} · Day {next.day}</span>
           </div>
           <h2 className="mt-3 font-display text-2xl font-bold leading-tight">{next.title}</h2>
-          {week && <p className="mt-1 text-sm text-muted">{week.title}</p>}
+          {week && <p className="mt-1 text-sm text-muted">Week {next.week} theme: {week.title}</p>}
           <LinkButton to={`/lesson/${next.id}`} variant="track" className="mt-5 w-full">
             <PlayIcon />
             {state.completed[next.id] ? 'Replay lesson' : doneCount === 0 ? 'Start your first lesson' : 'Start lesson'}

@@ -46,3 +46,18 @@ export const codeHas = (r: RunResult, what: string | RegExp) => (typeof what ===
 export const noError = (r: RunResult) => !r.error
 /** Output lines, trailing whitespace trimmed. */
 export const outLines = (r: RunResult) => r.output.replace(/\s+$/, '').split('\n').map((l) => l.replace(/\s+$/, ''))
+
+/* ---------- SQL helpers ---------- */
+
+/** True if the learner's SQL matches the pattern (case-insensitive by default). */
+export const sqlHas = (r: RunResult, re: RegExp) => new RegExp(re.source, re.flags.includes('i') ? re.flags : re.flags + 'i').test(r.input)
+/** Rows of the last result set. */
+export const lastRows = (r: RunResult) => r.rows ?? []
+/** Lower-cased column names of the last result set. */
+export const lastCols = (r: RunResult) => (r.results?.[r.results.length - 1]?.columns ?? []).map((c) => c.toLowerCase())
+/** Rows of a table after the run. */
+export const tableRows = (r: RunResult, name: string) => r.tables?.[name] ?? []
+/** True if a table or index exists after the run. */
+export const hasObject = (r: RunResult, name: string) => Boolean(r.schema && name in r.schema)
+/** Values of one column in the last result set, as strings. */
+export const column = (r: RunResult, name: string) => lastRows(r).map((row) => String(row[name] ?? row[name.toUpperCase()] ?? row[name.toLowerCase()] ?? 'NULL'))

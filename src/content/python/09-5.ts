@@ -24,9 +24,9 @@ const lesson: Lesson = {
   title: 'Mini project: a log parser CLI',
   concept: `Time to combine the week. A web server writes one line per request in a fixed shape: client address, timestamp in brackets, the request in quotes, the status code, and the size. A log parser turns thousands of those lines into a few numbers a person can read.
 
-The plan is the usual one for a small tool. Parse arguments with argparse: the log file, plus options. Read the file line by line. Pull the fields out of each line with split, being careful with the quoted request. Count with a Counter or a dictionary. Print a short report.
+The plan is the usual one for a small tool. Parse arguments with argparse. Read the file line by line. Pull the fields out with split, being careful with the quoted request. Count with a Counter. Print a short report.
 
-Build it in steps and run after each: first print the number of lines, then the status counts, then the top paths. Small steps with a run in between is how working programmers avoid long debugging sessions.`,
+Build it in steps and run after each: first the number of lines, then the status counts, then the top paths. Small steps with a run in between is how working programmers avoid long debugging sessions.`,
   example: {
     language: 'python',
     caption: 'Pulling fields from one line',

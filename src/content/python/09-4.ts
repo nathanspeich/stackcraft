@@ -10,11 +10,11 @@ const lesson: Lesson = {
   title: 'Calling an HTTP API',
   concept: `Many services expose an API: a web address that returns data instead of a page, usually as JSON. Your program sends a request, reads the response, and uses the data.
 
-The requests library makes this short. r = requests.get(url, params={"city": "Lisbon"}) sends a GET with a query string. r.status_code is the HTTP status: 200 means ok, 404 not found, 500 a server error. r.ok is True for 2xx. r.json() parses the JSON body into Python objects, and r.text is the raw body.
+The requests library makes this short. r = requests.get(url, params={"city": "Lisbon"}) sends a GET with a query string. r.status_code is the HTTP status: 200 ok, 404 not found, 500 server error. r.ok is True for 2xx. r.json() parses the body into Python objects.
 
-Always check the status before trusting the body, and pass timeout=5 so a dead server does not hang your program. Network calls can fail entirely, so wrap them in try/except requests.exceptions.ConnectionError.
+Check the status before trusting the body, and pass timeout=5 so a dead server cannot hang your program. Network calls can fail entirely, so wrap them in try/except requests.exceptions.ConnectionError.
 
-This sandbox has no network, so requests here answers from a built-in demo: https://api.stackcraft.dev/weather?city=... knows Lisbon, Seoul, Pune, and Oslo.`,
+This sandbox has no network, so requests answers from a built-in demo: the weather endpoint knows Lisbon, Seoul, Pune, and Oslo.`,
   example: {
     language: 'python',
     caption: 'Ask, check, use',

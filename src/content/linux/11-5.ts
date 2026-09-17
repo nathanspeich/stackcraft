@@ -24,13 +24,13 @@ const lesson: Lesson = {
   week: 11,
   day: 5,
   title: 'Logs and troubleshooting',
-  concept: `When something breaks, the machine has usually already written down why. Logs live in /var/log. syslog (or messages) collects general system events, auth.log records logins, and each service often has its own file.
+  concept: `When something breaks, the machine has usually already written down why. Logs live in /var/log: syslog collects general events, auth.log records logins, and services often have their own files.
 
-Reading logs is mostly tail and grep. tail -n 20 /var/log/syslog shows the most recent lines. tail -f follows new lines live. grep -i error narrows to problems, and grep -c counts them.
+Reading logs is mostly tail and grep. tail -n 20 /var/log/syslog shows the newest lines, tail -f follows them live, grep -i error narrows to problems, and grep -c counts them.
 
-For systemd services, journalctl -u name shows that service's log, and systemctl status name shows the last few lines plus whether it is running or failed.
+For systemd services, journalctl -u name shows that service's log, and systemctl status name shows the last lines plus whether it is running or failed.
 
-A simple method: notice the symptom, read the newest log lines around that time, form a guess, test it with one change, and write down what fixed it. Most reading of logs needs sudo, because they belong to root.`,
+The method: notice the symptom, read the newest lines around that time, form a guess, test one change, write down the fix. Most logs belong to root, so reading them needs sudo.`,
   example: {
     language: 'bash',
     caption: 'From symptom to fix',

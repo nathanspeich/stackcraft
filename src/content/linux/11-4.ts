@@ -10,11 +10,11 @@ const lesson: Lesson = {
   title: 'cron and systemd',
   concept: `Two systems run things when you are not there.
 
-cron runs commands on a schedule. Each user has a crontab, a list of lines with five time fields and a command: minute, hour, day of month, month, day of week. 30 2 * * * /home/learner/backup.sh means 02:30 every day. A star means every. crontab -l shows your schedule and crontab file installs one from a file.
+cron runs commands on a schedule. Each user has a crontab: lines with five time fields and a command: minute, hour, day of month, month, day of week. 30 2 * * * /home/learner/backup.sh means 02:30 every day. A star means every. crontab -l shows your schedule and crontab file installs one.
 
-systemd manages services: long running programs like a web server or sshd. systemctl status nginx shows whether it is running and its last log lines. start, stop, and restart change its state right now, and enable makes it start at boot. Changing a service needs sudo. journalctl -u nginx shows its full log.
+systemd manages services, long running programs like a web server. systemctl status nginx shows whether it runs and its last log lines. start, stop, and restart change it now, enable makes it start at boot, and changes need sudo. journalctl -u nginx shows its full log.
 
-Rule of thumb: a recurring task is a cron job, an always-on program is a service.`,
+A recurring task is a cron job. An always-on program is a service.`,
   example: {
     language: 'bash',
     caption: 'Schedule a job, check a service',

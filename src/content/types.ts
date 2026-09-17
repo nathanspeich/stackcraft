@@ -30,8 +30,14 @@ export interface RunResult {
   env?: Record<string, string>
   /** Extra simulated state: processes, packages, crontab, and so on. */
   state?: ShellState
-  /** Rows returned by the SQL runner, when applicable. */
+  /** SQL lessons: rows of the last result set, as objects keyed by column name. */
   rows?: Record<string, unknown>[]
+  /** SQL lessons: every result set of the last run, in order. */
+  results?: { columns: string[]; values: unknown[][] }[]
+  /** SQL lessons: every user table after the run, as row objects. */
+  tables?: Record<string, Record<string, unknown>[]>
+  /** SQL lessons: CREATE statements from sqlite_master, keyed by object name. */
+  schema?: Record<string, string>
 }
 
 /** Simulated machine state the shell exposes to checkers. */
@@ -67,6 +73,8 @@ export interface InAppTask {
   stdin?: string
   /** Python lessons: default command-line arguments. Shown as an editable box when set. */
   argv?: string[]
+  /** SQL lessons: statements that build the lesson's database before each run. */
+  setup?: string
   /** Short hints shown one at a time on request. */
   hints?: string[]
   /** Reference solution, used by tests and by the "show solution" link. */

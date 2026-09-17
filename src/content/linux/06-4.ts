@@ -8,13 +8,13 @@ const lesson: Lesson = {
   week: 6,
   day: 4,
   title: 'Networking basics: ip, ping, curl, ss',
-  concept: `Every machine on a network has an IP address, and every service on it listens on a port. A web server usually listens on port 80, SSH on 22. Four commands cover the basics.
+  concept: `Every machine on a network has an IP address, and every service listens on a port: web servers on 80, SSH on 22. Four commands cover the basics.
 
-ip addr shows your network interfaces and their addresses. The one that matters is the inet line on your main interface, like 192.168.64.5. lo is loopback, the machine talking to itself as 127.0.0.1 or localhost.
+ip addr shows your interfaces and addresses. Look for the inet line on your main interface, like 192.168.64.5. lo is loopback, the machine talking to itself as 127.0.0.1 or localhost.
 
-ping host sends small packets and reports whether replies come back and how fast. It is the first test when something cannot connect. Use -c 3 to send three and stop.
+ping host sends small packets and reports whether replies come back and how fast. Use -c 3 to send three and stop.
 
-curl URL fetches a web page and prints it. curl -I fetches only the headers, which is a quick way to check that a server answers.
+curl URL fetches a web page and prints it. curl -I fetches only the headers, a quick way to check that a server answers.
 
 ss -tulpn lists the ports this machine is listening on and which program owns each.`,
   example: {

@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router'
 import { useStore } from '../store/useStore'
 import { CardsIcon, HomeIcon, MapIcon, UserIcon } from './icons'
 import { cx } from '../lib/cx'
+import UpdateBanner from './UpdateBanner'
 
 const tabs = [
   { to: '/', label: 'Home', Icon: HomeIcon, end: true },
@@ -21,9 +22,10 @@ export default function Layout() {
   }, [theme])
 
   return (
-    <div className="min-h-dvh md:grid md:grid-cols-[240px_1fr]">
+    <div className="min-h-dvh md:pl-60">
+      <UpdateBanner />
       {/* Sidebar on wide screens */}
-      <aside className="hidden md:flex md:flex-col md:sticky md:top-0 md:h-dvh border-r border-border bg-surface px-4 py-6">
+      <aside className="hidden md:fixed md:inset-y-0 md:left-0 md:z-30 md:flex md:w-60 md:flex-col border-r border-border bg-surface px-4 py-6">
         <NavLink to="/" className="mb-8 flex items-center gap-2 px-2">
           <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" className="size-8 rounded-lg" />
           <span className="font-display text-xl font-extrabold tracking-tight">Stackcraft</span>

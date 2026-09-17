@@ -37,7 +37,7 @@
 }
 
 @theme inline {
-  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Lato", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-body: "Lato", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --color-bg: var(--c-bg);

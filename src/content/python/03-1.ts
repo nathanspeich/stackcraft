@@ -8,15 +8,15 @@ const lesson: Lesson = {
   week: 3,
   day: 1,
   title: 'Setup and print',
-  concept: `Python is a language for telling the computer what to do in short, readable lines. On Linux you run a file of Python with python3 script.py. Here the app runs it for you when you press Run.
+  concept: `Python is a language for telling the computer what to do in short, readable lines. On Linux you run a file of Python with python3 script.py. Here the app runs it when you press Run.
 
-print shows something on the screen. print("Hello") prints the text inside the quotes. Text in quotes is called a string. Without quotes, Python treats what you type as code: print(7 * 6) works out the multiplication first and prints 42.
+print shows something on the screen. print("Hello") prints the text inside the quotes, called a string. Without quotes, Python treats it as code: print(7 * 6) works out the multiplication and prints 42.
 
 print can take several things separated by commas and puts a space between them: print("Total:", 42).
 
-Lines that start with # are comments. Python ignores them, and future you will thank present you for writing them.
+Lines starting with # are comments. Python ignores them, and future you will thank present you.
 
-Python cares about exact spelling and matching brackets. Read error messages from the bottom up; the last line says what went wrong.`,
+Python cares about exact spelling and matching brackets. Read error messages from the bottom up: the last line says what went wrong.`,
   example: {
     language: 'python',
     caption: 'main.py',

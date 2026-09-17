@@ -10,13 +10,13 @@ const lesson: Lesson = {
   title: 'Processes: ps, top, kill, jobs',
   concept: `A running program is a process. Each one has a number called a PID, an owner, and a share of CPU and memory.
 
-ps aux lists every process on the machine with its user, PID, CPU and memory percentages, and command. Pipe it into grep to find one by name: ps aux | grep python.
+ps aux lists every process with its user, PID, CPU and memory percentages, and command. Pipe it into grep to find one by name: ps aux | grep python.
 
-top shows the same information live, sorted by CPU, refreshing every few seconds. Press q to leave it. It is the first thing to open when a machine feels slow.
+top shows the same information live, sorted by CPU. Press q to leave. It is the first thing to open when a machine feels slow.
 
-kill PID asks a process to stop politely. kill -9 PID forces it, which you use only when the polite version is ignored. You can only kill your own processes unless you use sudo.
+kill PID asks a process to stop politely. kill -9 PID forces it, for when the polite version is ignored. You can only kill your own processes unless you use sudo.
 
-Adding & after a command runs it in the background. jobs lists those background jobs.`,
+Adding & after a command runs it in the background, and jobs lists those background jobs.`,
   example: {
     language: 'bash',
     caption: 'Find the hog, stop it',

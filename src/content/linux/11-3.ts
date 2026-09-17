@@ -14,9 +14,9 @@ Loops repeat. for f in reports/*.txt; do echo "$f"; done runs the body once per 
 
 Conditions decide. if [ -f "$f" ]; then ... fi runs the body when the test passes. Common tests: -f file exists, -d directory exists, "$a" = "$b" strings equal, $n -gt 3 number greater than.
 
-Functions name a block: count_lines() { wc -l < "$1"; } and then count_lines file.txt calls it with $1 set inside.
+Functions name a block: count_lines() { wc -l < "$1"; } and count_lines file.txt calls it with $1 set inside.
 
-Every command ends with an exit code: 0 means success, anything else means failure. echo $? shows the last one. Scripts set their own with exit 0 or exit 1, and other tools and scripts rely on that to know whether things worked.`,
+Every command ends with an exit code: 0 means success, anything else failure. echo $? shows the last one. Scripts set their own with exit 0 or exit 1, and other tools rely on it.`,
   example: {
     language: 'bash',
     caption: 'A loop, a function, and an exit code',
