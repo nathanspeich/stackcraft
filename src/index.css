@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Theme tokens. Dark is the default; light overrides below. */
+:root {
+  --c-bg: #0b1020;
+  --c-surface: #141a2e;
+  --c-surface-2: #1c2440;
+  --c-border: #263052;
+  --c-text: #e8ebf5;
+  --c-muted: #9aa3c2;
+  --c-linux: #34d399;
+  --c-python: #60a5fa;
+  --c-sql: #f472b6;
+  --c-capstone: #fbbf24;
+  --c-accent: #fbbf24;
+  --c-danger: #f87171;
+  --c-on-color: #0b1020;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --c-bg: #f4f5fb;
+  --c-surface: #ffffff;
+  --c-surface-2: #eceef8;
+  --c-border: #d8dcee;
+  --c-text: #141a2e;
+  --c-muted: #5b6386;
+  --c-linux: #059669;
+  --c-python: #2563eb;
+  --c-sql: #db2777;
+  --c-capstone: #d97706;
+  --c-accent: #d97706;
+  --c-danger: #dc2626;
+  --c-on-color: #ffffff;
+  color-scheme: light;
+}
+
+@theme inline {
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --color-bg: var(--c-bg);
+  --color-surface: var(--c-surface);
+  --color-surface-2: var(--c-surface-2);
+  --color-border: var(--c-border);
+  --color-text: var(--c-text);
+  --color-muted: var(--c-muted);
+  --color-linux: var(--c-linux);
+  --color-python: var(--c-python);
+  --color-sql: var(--c-sql);
+  --color-capstone: var(--c-capstone);
+  --color-accent: var(--c-accent);
+  --color-danger: var(--c-danger);
+  --color-on-color: var(--c-on-color);
+}
+
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior-y: none;
+}
+#root { min-height: 100%; }
+
+/* Safe areas for notched phones */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+
+/* Utility: track color as a CSS variable set by data-track */
+[data-track="linux"] { --track: var(--c-linux); }
+[data-track="python"] { --track: var(--c-python); }
+[data-track="sql"] { --track: var(--c-sql); }
+[data-track="capstone"] { --track: var(--c-capstone); }
+
+@utility text-track { color: var(--track); }
+@utility bg-track { background-color: var(--track); }
+@utility border-track { border-color: var(--track); }
+@utility ring-track { --tw-ring-color: var(--track); }
+
+/* Short, reduced-motion friendly animations */
+@keyframes pop-in {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes rise-fade {
+  0% { transform: translateY(8px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+@keyframes confetti-fall {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(var(--dx), 140px, 0) rotate(540deg); opacity: 0; }
+}
+@keyframes flame {
+  0%, 100% { transform: scale(1) rotate(-2deg); }
+  50% { transform: scale(1.08) rotate(2deg); }
+}
+.anim-pop { animation: pop-in 420ms cubic-bezier(.2,.9,.3,1.2) both; }
+.anim-rise { animation: rise-fade 300ms ease-out both; }
+.anim-flame { animation: flame 1.6s ease-in-out infinite; transform-origin: 50% 90%; }
+.confetti-piece { animation: confetti-fall 900ms ease-in both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-pop, .anim-rise, .anim-flame, .confetti-piece { animation: none !important; }
+  * { scroll-behavior: auto !important; }
+}
+
+/* Code blocks never wrap terminal output */
+pre, code { font-family: var(--font-mono); }
+pre { white-space: pre; overflow-x: auto; }
