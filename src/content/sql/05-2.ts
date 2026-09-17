@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { hasObject, sqlHas, steps, tableRows } from '../checks'
+import { hasObject, lastOk, sqlHas, steps, tableRows } from '../checks'
 
 const lesson: Lesson = {
   id: 'w05d2',
@@ -30,24 +30,23 @@ SELECT * FROM tags;`,
   },
   task: {
     kind: 'sql',
-    instructions: 'The shop needs to track suppliers.\n1. Create a table suppliers with columns: id INTEGER PRIMARY KEY, name TEXT NOT NULL, country TEXT, and rating INTEGER with a DEFAULT of 3.\n2. Insert three suppliers: Keycap Co from JP with rating 5, Cable Works from CN (leave the rating out so the default applies), and Print House from PT with rating 4. Let id fill itself in.\n3. Select everything from suppliers.',
-    starter: '-- Create suppliers, insert three rows, then select them\n',
+    instructions: 'The shop needs to track suppliers. Run each step as its own statement, pressing Run after each:\n1. Create a table suppliers with columns id INTEGER PRIMARY KEY, name TEXT NOT NULL, country TEXT, and rating INTEGER with a DEFAULT of 3.\n2. Insert Keycap Co from JP with rating 5. Leave id out so it fills itself in.\n3. Insert Cable Works from CN, leaving the rating out so the default applies.\n4. Insert Print House from PT with rating 4.\n5. Select everything from suppliers to see the three rows.',
     setup: SHOP,
     hints: ['CREATE TABLE suppliers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, country TEXT, rating INTEGER DEFAULT 3);', "INSERT INTO suppliers (name, country, rating) VALUES ('Keycap Co', 'JP', 5);", "INSERT INTO suppliers (name, country) VALUES ('Cable Works', 'CN'); the rating becomes 3 by default.", 'SELECT * FROM suppliers;'],
-    solution: { file: "CREATE TABLE suppliers (\n  id INTEGER PRIMARY KEY,\n  name TEXT NOT NULL,\n  country TEXT,\n  rating INTEGER DEFAULT 3\n);\nINSERT INTO suppliers (name, country, rating) VALUES ('Keycap Co', 'JP', 5);\nINSERT INTO suppliers (name, country) VALUES ('Cable Works', 'CN');\nINSERT INTO suppliers (name, country, rating) VALUES ('Print House', 'PT', 4);\nSELECT * FROM suppliers;\n" },
+    solution: { commands: ['CREATE TABLE suppliers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, country TEXT, rating INTEGER DEFAULT 3);', "INSERT INTO suppliers (name, country, rating) VALUES ('Keycap Co', 'JP', 5);", "INSERT INTO suppliers (name, country) VALUES ('Cable Works', 'CN');", "INSERT INTO suppliers (name, country, rating) VALUES ('Print House', 'PT', 4);", 'SELECT * FROM suppliers;'] },
     check: (r) => {
       const rows = tableRows(r, 'suppliers')
       const byName = (n: string) => rows.find((x) => x.name === n)
       const schema = (r.schema?.suppliers ?? '').replace(/\s+/g, ' ').toLowerCase()
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
-        [hasObject(r, 'suppliers'), 'Create the suppliers table with CREATE TABLE.'],
-        [/id integer primary key/.test(schema) && /name text not null/.test(schema) && /rating integer default 3/.test(schema), 'Columns should be: id INTEGER PRIMARY KEY, name TEXT NOT NULL, country TEXT, rating INTEGER DEFAULT 3.'],
-        [rows.length === 3, `suppliers should hold exactly 3 rows, it has ${rows.length}.`],
-        [byName('Keycap Co')?.country === 'JP' && byName('Keycap Co')?.rating === 5, 'Insert Keycap Co from JP with rating 5.'],
-        [byName('Cable Works')?.country === 'CN' && byName('Cable Works')?.rating === 3 && !sqlHas(r, /Cable Works'\s*,\s*'CN'\s*,\s*3/), 'Insert Cable Works from CN without a rating, so the DEFAULT of 3 fills it in.'],
-        [byName('Print House')?.rating === 4 && rows.map((x) => x.id).join(',') === '1,2,3', 'Insert Print House from PT with rating 4. The ids should be 1, 2, 3 assigned automatically.'],
-        [sqlHas(r, /SELECT\s+\*\s+FROM\s+suppliers/), 'Finish with SELECT * FROM suppliers.'],
+        lastOk(r),
+        [hasObject(r, 'suppliers'), 'Step 1: create the suppliers table with CREATE TABLE.'],
+        [/id integer primary key/.test(schema) && /name text not null/.test(schema) && /rating integer default 3/.test(schema), 'Columns should be: id INTEGER PRIMARY KEY, name TEXT NOT NULL, country TEXT, rating INTEGER DEFAULT 3. Reset the database if you need to recreate it.'],
+        [byName('Keycap Co')?.country === 'JP' && byName('Keycap Co')?.rating === 5, 'Step 2: insert Keycap Co from JP with rating 5.'],
+        [byName('Cable Works')?.country === 'CN' && byName('Cable Works')?.rating === 3 && !sqlHas(r, /Cable Works'\s*,\s*'CN'\s*,\s*3/), 'Step 3: insert Cable Works from CN without a rating, so the DEFAULT of 3 fills it in.'],
+        [byName('Print House')?.country === 'PT' && byName('Print House')?.rating === 4, 'Step 4: insert Print House from PT with rating 4.'],
+        [rows.length === 3 && rows.map((x) => x.id).join(',') === '1,2,3', `suppliers should hold exactly 3 rows with ids 1, 2, 3 assigned automatically (it has ${rows.length}). Reset the database and redo the inserts if you added extras.`],
+        [sqlHas(r, /SELECT\s+\*\s+FROM\s+suppliers/), 'Step 5: finish with SELECT * FROM suppliers.'],
       ], 'Table designed, rows inserted, defaults and auto ids working.')
     },
   },

@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { sqlHas, steps } from '../checks'
+import { lastOk, sqlHas, steps } from '../checks'
 
 const lesson: Lesson = {
   id: 'w05d3',
@@ -34,19 +34,18 @@ ORDER BY stock_value DESC;`,
   },
   task: {
     kind: 'sql',
-    instructions: 'Write three queries:\n1. The name and price of the two most expensive books (category = \'books\'), most expensive first.\n2. The names of the three customers who joined most recently (sort by joined, newest first).\n3. The name, stock, and a computed column value (price times stock, named value with AS) for products that have stock, sorted by value from highest to lowest.',
-    starter: '-- Three queries with WHERE, ORDER BY, LIMIT\n',
+    instructions: 'Run each step as its own statement, pressing Run after each:\n1. The name and price of the two most expensive books (category = \'books\'), most expensive first.\n2. The names of the three customers who joined most recently (sort by joined, newest first).\n3. The name, stock, and a computed column value (price times stock, named value with AS) for products that have stock, sorted by value from highest to lowest.',
     setup: SHOP,
     hints: ["SELECT name, price FROM products WHERE category = 'books' ORDER BY price DESC LIMIT 2;", 'SELECT name FROM customers ORDER BY joined DESC LIMIT 3;', 'SELECT name, stock, price * stock AS value FROM products WHERE stock > 0 ORDER BY value DESC;'],
-    solution: { file: "SELECT name, price FROM products WHERE category = 'books' ORDER BY price DESC LIMIT 2;\nSELECT name FROM customers ORDER BY joined DESC LIMIT 3;\nSELECT name, stock, price * stock AS value FROM products WHERE stock > 0 ORDER BY value DESC;\n" },
+    solution: { commands: ["SELECT name, price FROM products WHERE category = 'books' ORDER BY price DESC LIMIT 2;", 'SELECT name FROM customers ORDER BY joined DESC LIMIT 3;', 'SELECT name, stock, price * stock AS value FROM products WHERE stock > 0 ORDER BY value DESC;'] },
     check: (r) => {
       const sets = r.results ?? []
       const first = (s: { values: unknown[][] }) => s.values.map((v) => v[0]).join('|')
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
-        [sets.some((s) => s.values.length === 2 && first(s) === 'Linux handbook|SQL cookbook' && s.columns.length === 2), 'Query 1: two rows, Linux handbook then SQL cookbook, with name and price. Use WHERE, ORDER BY price DESC, LIMIT 2.'],
-        [sets.some((s) => first(s) === 'Lea Novak|Sam Hill|Zoe Berg'), 'Query 2: Lea Novak, Sam Hill, Zoe Berg in that order (ORDER BY joined DESC LIMIT 3).'],
-        [sqlHas(r, /\bAS\s+value\b/) && sets.some((s) => s.columns.map((c) => c.toLowerCase()).includes('value') && s.values.length === 6 && first(s) === 'USB-C cable|Sticker pack|Mechanical keyboard|Linux handbook|Hoodie|SQL cookbook'), 'Query 3: six in-stock products with a value column, USB-C cable first (1330) and SQL cookbook last (228).'],
+        lastOk(r),
+        [sets.some((s) => s.values.length === 2 && first(s) === 'Linux handbook|SQL cookbook' && s.columns.length === 2), 'Step 1: two rows, Linux handbook then SQL cookbook, with name and price. Use WHERE, ORDER BY price DESC, LIMIT 2.'],
+        [sets.some((s) => first(s) === 'Lea Novak|Sam Hill|Zoe Berg'), 'Step 2: Lea Novak, Sam Hill, Zoe Berg in that order (ORDER BY joined DESC LIMIT 3).'],
+        [sqlHas(r, /\bAS\s+value\b/) && sets.some((s) => s.columns.map((c) => c.toLowerCase()).includes('value') && s.values.length === 6 && first(s) === 'USB-C cable|Sticker pack|Mechanical keyboard|Linux handbook|Hoodie|SQL cookbook'), 'Step 3: six in-stock products with a value column, USB-C cable first (1330) and SQL cookbook last (228).'],
       ], 'Filtered, sorted, limited, and computed.')
     },
   },

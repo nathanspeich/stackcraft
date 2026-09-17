@@ -474,12 +474,13 @@ export const COMMANDS: Record<string, Command> = {
     if (!operands.length) return fail('tr: missing operand')
     const set1 = expandSet(operands[0])
     if (flags.has('d')) return ok([...stdin].filter((c) => !set1.includes(c)).join(''))
-    if (operands.length < 2) return fail('tr: missing operand after SET1')
+    const squeeze = (text: string, set: string[]) => text.replace(new RegExp(`([${set.map((c) => c.replace(/[\\\]^-]/g, '\\$&')).join('')}])\\1+`, 'g'), '$1')
+    if (operands.length < 2) return flags.has('s') ? ok(squeeze(stdin, set1)) : fail('tr: missing operand after SET1')
     const set2 = expandSet(operands[1])
     const map = new Map<string, string>()
     set1.forEach((c, i) => map.set(c, set2[Math.min(i, set2.length - 1)]))
     let out = [...stdin].map((c) => map.get(c) ?? c).join('')
-    if (flags.has('s')) out = out.replace(new RegExp(`([${set2.map((c) => c.replace(/[\\\]^-]/g, '\\$&')).join('')}])\\1+`, 'g'), '$1')
+    if (flags.has('s')) out = squeeze(out, set2)
     return ok(out)
   },
 
@@ -725,7 +726,20 @@ export const COMMANDS: Record<string, Command> = {
   },
   uptime: () => ok(' 09:41:07 up 3 days,  2:15,  1 user,  load average: 0.08, 0.05, 0.01\n'),
   hostname: () => ok(HOSTNAME + '\n'),
-  date: () => ok(new Date().toString().replace(/ GMT.*$/, '') + '\n'),
+  date: (_sh, args) => {
+    const now = new Date()
+    const fmt = args.find((a) => a.startsWith('+'))
+    if (!fmt) return ok(now.toString().replace(/ GMT.*$/, '') + '\n')
+    const p2 = (n: number) => String(n).padStart(2, '0')
+    const map: Record<string, string> = {
+      Y: String(now.getFullYear()), m: p2(now.getMonth() + 1), d: p2(now.getDate()),
+      H: p2(now.getHours()), M: p2(now.getMinutes()), S: p2(now.getSeconds()),
+      F: `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`,
+      T: `${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`,
+      s: String(Math.floor(now.getTime() / 1000)), a: now.toDateString().slice(0, 3), b: now.toDateString().slice(4, 7),
+    }
+    return ok(fmt.slice(1).replace(/%(.)/g, (m, c) => map[c] ?? m) + '\n')
+  },
 
   apt: (sh, args) => {
     const sub = args.find((a) => !a.startsWith('-'))

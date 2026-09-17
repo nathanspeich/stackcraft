@@ -10,6 +10,8 @@ import StreakFlame from '../components/StreakFlame'
 import XpBar from '../components/XpBar'
 import { Button, Card, PageTitle, ProgressBar, TrackPill } from '../components/ui'
 import { cx } from '../lib/cx'
+import { playSound } from '../lib/sound'
+import { ALL_CARDS } from '../content/cards'
 
 const TRACKS: Track[] = ['linux', 'python', 'sql']
 const TRACK_BAR: Record<Track, string> = { linux: 'bg-linux', python: 'bg-python', sql: 'bg-sql', capstone: 'bg-capstone' }
@@ -66,10 +68,12 @@ export default function Profile() {
           <p><span className="font-mono font-bold">{state.streak.longest}</span> <span className="text-muted">longest</span></p>
           <p><span className="font-mono font-bold">{state.streak.freezes}</span> <span className="text-muted">🧊 freezes</span></p>
         </div>
+        <p className="col-span-3 text-xs text-muted">A day counts with one lesson or ten card reviews. Every 7 days in a row earns a freeze, which covers one missed day on its own.</p>
       </Card>
 
       <Card>
-        <h2 className="mb-3 font-display text-lg font-bold">Track mastery</h2>
+        <h2 className="mb-1 font-display text-lg font-bold">Track mastery</h2>
+        <p className="mb-3 text-xs text-muted">{Object.keys(state.cards).length} of {ALL_CARDS.length} flashcards reviewed at least once.</p>
         <ul className="space-y-3">
           {TRACKS.map((t) => {
             const m = trackMastery(state, t)
@@ -128,7 +132,7 @@ export default function Profile() {
       <Card className="space-y-2">
         <h2 className="font-display text-lg font-bold">Settings</h2>
         <Toggle label="Light theme" hint="Dark is the default." on={state.settings.theme === 'light'} onChange={(v) => setTheme(v ? 'light' : 'dark')} />
-        <Toggle label="Sound effects" hint="Off by default. Sounds arrive in phase 5." on={state.settings.sound} onChange={setSound} />
+        <Toggle label="Sound effects" hint="Short chimes on quiz answers, card reviews, and lesson completion. Off by default." on={state.settings.sound} onChange={(v) => { setSound(v); if (v) setTimeout(() => playSound('correct'), 0) }} />
       </Card>
 
       <Card>

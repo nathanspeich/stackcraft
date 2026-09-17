@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { hasObject, sqlHas, steps, tableRows } from '../checks'
+import { hasObject, sqlFailed, steps, tableRows } from '../checks'
 
 const lesson: Lesson = {
   id: 'w08d3',
@@ -33,20 +33,21 @@ INSERT INTO reviews (product_id, rating) VALUES (99, 3);
   },
   task: {
     kind: 'sql',
-    instructions: '1. Create a reviews table: id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL that REFERENCES products(id), rating INTEGER NOT NULL with CHECK (rating BETWEEN 1 AND 5), and body TEXT.\n2. Insert two valid reviews: product 1 rated 5 with the body Clicky, and product 4 rated 4 with no body.\n3. As the last statement, try to insert a review for product 99 rated 3, and watch the foreign key reject it. Your script will stop at that error, which is expected here.',
-    starter: '-- Keys and constraints\n',
+    instructions: 'Run each step as its own statement, pressing Run after each:\n1. Create a reviews table: id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL that REFERENCES products(id), rating INTEGER NOT NULL with CHECK (rating BETWEEN 1 AND 5), and body TEXT.\n2. Insert a review for product 1 rated 5 with the body Clicky.\n3. Insert a review for product 4 rated 4 with no body.\n4. Try to insert a review for product 99 rated 3 and watch the foreign key reject it. The error is the point: the earlier rows are untouched.',
     setup: SHOP,
-    hints: ['CREATE TABLE reviews (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id), rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5), body TEXT);', "INSERT INTO reviews (product_id, rating, body) VALUES (1, 5, 'Clicky'), (4, 4, NULL);", 'INSERT INTO reviews (product_id, rating) VALUES (99, 3); should fail with FOREIGN KEY constraint failed.'],
-    solution: { file: "CREATE TABLE reviews (\n  id INTEGER PRIMARY KEY,\n  product_id INTEGER NOT NULL REFERENCES products(id),\n  rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),\n  body TEXT\n);\nINSERT INTO reviews (product_id, rating, body) VALUES (1, 5, 'Clicky');\nINSERT INTO reviews (product_id, rating) VALUES (4, 4);\nINSERT INTO reviews (product_id, rating) VALUES (99, 3);\n" },
+    hints: ['CREATE TABLE reviews (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id), rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5), body TEXT);', "INSERT INTO reviews (product_id, rating, body) VALUES (1, 5, 'Clicky');", 'INSERT INTO reviews (product_id, rating) VALUES (4, 4);', 'INSERT INTO reviews (product_id, rating) VALUES (99, 3); should fail with FOREIGN KEY constraint failed.'],
+    solution: { commands: ['CREATE TABLE reviews (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id), rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5), body TEXT);', "INSERT INTO reviews (product_id, rating, body) VALUES (1, 5, 'Clicky');", 'INSERT INTO reviews (product_id, rating) VALUES (4, 4);', 'INSERT INTO reviews (product_id, rating) VALUES (99, 3);'] },
     check: (r) => {
       const schema = (r.schema?.reviews ?? '').replace(/\s+/g, ' ').toLowerCase()
       const rows = tableRows(r, 'reviews')
       return steps([
-        [hasObject(r, 'reviews'), 'Create the reviews table first.'],
-        [/references products\s*\(\s*id\s*\)/.test(schema), 'product_id must REFERENCES products(id).'],
-        [/check\s*\(\s*rating between 1 and 5\s*\)/.test(schema), 'rating needs CHECK (rating BETWEEN 1 AND 5).'],
-        [rows.length === 2 && rows.some((x) => x.product_id === 1 && x.rating === 5 && x.body === 'Clicky') && rows.some((x) => x.product_id === 4 && x.rating === 4 && x.body === null), 'Insert exactly two valid reviews: product 1 rated 5 with body Clicky, product 4 rated 4 with no body.'],
-        [sqlHas(r, /VALUES\s*\(\s*99\s*,/) && /FOREIGN KEY constraint failed/.test(r.error ?? ''), 'Make the last statement an insert for product 99. It should fail with FOREIGN KEY constraint failed.'],
+        [hasObject(r, 'reviews'), 'Step 1: create the reviews table first.'],
+        [/references products\s*\(\s*id\s*\)/.test(schema), 'product_id must REFERENCES products(id). Reset the database to recreate the table.'],
+        [/check\s*\(\s*rating between 1 and 5\s*\)/.test(schema), 'rating needs CHECK (rating BETWEEN 1 AND 5). Reset the database to recreate the table.'],
+        [rows.some((x) => x.product_id === 1 && x.rating === 5 && x.body === 'Clicky'), 'Step 2: insert a review for product 1 rated 5 with body Clicky.'],
+        [rows.some((x) => x.product_id === 4 && x.rating === 4 && x.body === null), 'Step 3: insert a review for product 4 rated 4 with no body.'],
+        [rows.length === 2, `reviews should hold exactly 2 rows (it has ${rows.length}). Reset the database if you inserted extras.`],
+        [sqlFailed(r, /VALUES\s*\(\s*99\s*,/, /FOREIGN KEY constraint failed/), 'Step 4: try inserting a review for product 99. It should fail with FOREIGN KEY constraint failed.'],
       ], 'The database now refuses bad data on your behalf.')
     },
   },

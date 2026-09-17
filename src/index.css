@@ -71,6 +71,14 @@ body {
 .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
 
+/* Bottom tab bar height: 56px of buttons plus the phone's home-indicator inset. Zero on wide screens, where the sidebar takes over. */
+:root { --tabbar-h: calc(56px + env(safe-area-inset-bottom, 0px)); }
+@media (min-width: 768px) { :root { --tabbar-h: 0px; } }
+/* Every scrollable page keeps this much clear above the tab bar so nothing sits under it. */
+.pb-tabbar { padding-bottom: calc(var(--tabbar-h) + 1.5rem); }
+/* Sticky action bars sit right on top of the tab bar. */
+.bottom-tabbar { bottom: var(--tabbar-h); }
+
 /* Utility: track color as a CSS variable set by data-track */
 [data-track="linux"] { --track: var(--c-linux); }
 [data-track="python"] { --track: var(--c-python); }
@@ -107,8 +115,15 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .anim-pop, .anim-rise, .anim-flame, .confetti-piece { animation: none !important; }
-  * { scroll-behavior: auto !important; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
+
+/* Light theme: cards need a touch of shadow to separate from the page, and code panes stay a shade darker than cards. */
+:root[data-theme="light"] section.bg-surface { box-shadow: 0 1px 2px rgb(20 26 46 / 0.06); }
+:root[data-theme="light"] ::selection { background: #fde68a; }
+
+/* Focus rings for keyboard users, in both themes */
+:where(button, a, input, textarea, [role="switch"]):focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
 
 /* Code blocks never wrap terminal output */
 pre, code { font-family: var(--font-mono); }

@@ -49,9 +49,15 @@ export const outLines = (r: RunResult) => r.output.replace(/\s+$/, '').split('\n
 
 /* ---------- SQL helpers ---------- */
 
-/** True if the learner's SQL matches the pattern (case-insensitive by default). */
-export const sqlHas = (r: RunResult, re: RegExp) => new RegExp(re.source, re.flags.includes('i') ? re.flags : re.flags + 'i').test(r.input)
-/** Rows of the last result set. */
+/** Every statement run in the console since the last reset, joined as one script with a semicolon after each. */
+export const sqlText = (r: RunResult) => (r.history?.length ? r.history.map((s) => s.replace(/;\s*$/, '') + ';').join('\n') : r.input)
+/** True if any statement the learner ran matches the pattern (case-insensitive by default). */
+export const sqlHas = (r: RunResult, re: RegExp) => new RegExp(re.source, re.flags.includes('i') ? re.flags : re.flags + 'i').test(sqlText(r))
+/** True if some statement matched stmt and failed with an error matching err. */
+export const sqlFailed = (r: RunResult, stmt: RegExp, err: RegExp) => ranWith(r, new RegExp(stmt.source, stmt.flags.includes('i') ? stmt.flags : stmt.flags + 'i'), err)
+/** Message for the standard first check: the last statement must have run cleanly. */
+export const lastOk = (r: RunResult): [boolean, string] => [!r.error, `Your last statement failed: ${r.error}. Fix it and run it again.`]
+/** Rows of the most recent result set. */
 export const lastRows = (r: RunResult) => r.rows ?? []
 /** Lower-cased column names of the last result set. */
 export const lastCols = (r: RunResult) => (r.results?.[r.results.length - 1]?.columns ?? []).map((c) => c.toLowerCase())

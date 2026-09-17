@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import type { Lesson } from '../src/content/types'
 import { shellForTask as build } from '../src/shell/taskRunner'
 import { runPython, toRunResult, type PyodideLike } from '../src/python/run'
-import { runSql, toRunResult as toSqlResult } from '../src/sql/run'
+import { SqlSession } from '../src/sql/run'
 import type { SqlJsStatic } from 'sql.js'
 
 let sqljs: SqlJsStatic | null = null
@@ -82,14 +82,23 @@ for (const dir of dirs) {
     if (lesson.task.kind === 'sql') {
       const task = lesson.task
       const SQL = await sql()
-      const runOne = (script: string) => toSqlResult([{ sql: script, result: runSql(SQL, task.setup ?? '', script) }])
-      if (task.check(runOne(task.starter ?? '')).pass) problems.push('checker passes on the starter script')
-      if (!task.solution?.file) problems.push('no solution file')
+      const session = new SqlSession(SQL, task.setup ?? '')
+      if (session.setupError) problems.push(session.setupError)
+      if (task.check(session.toRunResult()).pass) problems.push('checker passes on an empty console')
+      if (!task.solution?.commands?.length) problems.push('no solution commands')
       else {
-        const r = runOne(task.solution.file)
+        // Statements run one at a time, as in the console; the checker sees the whole sequence.
+        for (const stmt of task.solution.commands) session.run(stmt)
+        const r = session.toRunResult()
         const c = task.check(r)
         if (!c.pass) problems.push(`solution does not pass: ${c.message}\n    output: ${JSON.stringify(r.output.slice(0, 300))}`)
+        // Each earlier prefix of the solution must not pass, so the steps have to be done in full.
+        const partial = new SqlSession(SQL, task.setup ?? '')
+        for (const stmt of task.solution.commands.slice(0, -1)) partial.run(stmt)
+        if (task.solution.commands.length > 1 && task.check(partial.toRunResult()).pass) problems.push('checker passes before the last solution statement')
+        partial.close()
       }
+      session.close()
     }
     if (problems.length) { fails++; console.log(`FAIL ${lesson.id} ${lesson.title}\n  - ${problems.join('\n  - ')}`) }
   }

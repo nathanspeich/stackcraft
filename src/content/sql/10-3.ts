@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { hasObject, sqlHas, steps, tableRows } from '../checks'
+import { hasObject, sqlFailed, sqlHas, steps, tableRows } from '../checks'
 
 const lesson: Lesson = {
   id: 'w10d3',
@@ -32,21 +32,20 @@ INSERT INTO coupons VALUES ('WELCOME', 20);
   },
   task: {
     kind: 'sql',
-    instructions: '1. Add a column sku TEXT to products with ALTER TABLE, then fill it for every row as P- followed by the id (use || to concatenate).\n2. Create a table coupons with code TEXT PRIMARY KEY, percent INTEGER NOT NULL with CHECK (percent BETWEEN 1 AND 90), and expires TEXT.\n3. Insert WELCOME at 10 percent and SUMMER at 25 percent (expires can be NULL).\n4. As the last statement, insert a coupon BAD at 150 percent and watch the CHECK constraint reject it.',
-    starter: '-- ALTER TABLE and constraints\n',
+    instructions: 'Run each step as its own statement, pressing Run after each:\n1. Add a column sku TEXT to products with ALTER TABLE.\n2. UPDATE every product so sku is P- followed by the id (use || to concatenate).\n3. Create a table coupons with code TEXT PRIMARY KEY, percent INTEGER NOT NULL with CHECK (percent BETWEEN 1 AND 90), and expires TEXT.\n4. Insert WELCOME at 10 percent and SUMMER at 25 percent in one INSERT (expires can be left out).\n5. Try to insert a coupon BAD at 150 percent and watch the CHECK constraint reject it.',
     setup: SHOP,
     hints: ["ALTER TABLE products ADD COLUMN sku TEXT; then UPDATE products SET sku = 'P-' || id;", 'CREATE TABLE coupons (code TEXT PRIMARY KEY, percent INTEGER NOT NULL CHECK (percent BETWEEN 1 AND 90), expires TEXT);', "INSERT INTO coupons (code, percent) VALUES ('WELCOME', 10), ('SUMMER', 25);", "INSERT INTO coupons (code, percent) VALUES ('BAD', 150); fails with CHECK constraint failed."],
-    solution: { file: "ALTER TABLE products ADD COLUMN sku TEXT;\nUPDATE products SET sku = 'P-' || id;\nCREATE TABLE coupons (\n  code TEXT PRIMARY KEY,\n  percent INTEGER NOT NULL CHECK (percent BETWEEN 1 AND 90),\n  expires TEXT\n);\nINSERT INTO coupons (code, percent) VALUES ('WELCOME', 10), ('SUMMER', 25);\nINSERT INTO coupons (code, percent) VALUES ('BAD', 150);\n" },
+    solution: { commands: ['ALTER TABLE products ADD COLUMN sku TEXT;', "UPDATE products SET sku = 'P-' || id;", 'CREATE TABLE coupons (code TEXT PRIMARY KEY, percent INTEGER NOT NULL CHECK (percent BETWEEN 1 AND 90), expires TEXT);', "INSERT INTO coupons (code, percent) VALUES ('WELCOME', 10), ('SUMMER', 25);", "INSERT INTO coupons (code, percent) VALUES ('BAD', 150);"] },
     check: (r) => {
       const products = tableRows(r, 'products')
       const coupons = tableRows(r, 'coupons')
       const schema = (r.schema?.coupons ?? '').replace(/\s+/g, ' ').toLowerCase()
       return steps([
-        [sqlHas(r, /ALTER\s+TABLE\s+products\s+ADD\s+COLUMN\s+sku/) && /sku/i.test(r.schema?.products ?? ''), 'Add the column: ALTER TABLE products ADD COLUMN sku TEXT.'],
-        [products.length === 8 && products.every((p) => p.sku === `P-${p.id}`), "Fill every sku as P- followed by the id: UPDATE products SET sku = 'P-' || id."],
-        [hasObject(r, 'coupons') && /code text primary key/.test(schema) && /check\s*\(\s*percent between 1 and 90\s*\)/.test(schema), 'Create coupons with code TEXT PRIMARY KEY and CHECK (percent BETWEEN 1 AND 90).'],
-        [coupons.length === 2 && coupons.some((c) => c.code === 'WELCOME' && c.percent === 10) && coupons.some((c) => c.code === 'SUMMER' && c.percent === 25), 'Insert WELCOME at 10 and SUMMER at 25.'],
-        [sqlHas(r, /'BAD'\s*,\s*150/) && /CHECK constraint failed/.test(r.error ?? ''), 'Make the last statement insert BAD at 150. It should fail with CHECK constraint failed.'],
+        [sqlHas(r, /ALTER\s+TABLE\s+products\s+ADD\s+COLUMN\s+sku/) && /sku/i.test(r.schema?.products ?? ''), 'Step 1: ALTER TABLE products ADD COLUMN sku TEXT.'],
+        [products.length === 8 && products.every((p) => p.sku === `P-${p.id}`), "Step 2: fill every sku as P- followed by the id: UPDATE products SET sku = 'P-' || id."],
+        [hasObject(r, 'coupons') && /code text primary key/.test(schema) && /check\s*\(\s*percent between 1 and 90\s*\)/.test(schema), 'Step 3: create coupons with code TEXT PRIMARY KEY and CHECK (percent BETWEEN 1 AND 90).'],
+        [coupons.length === 2 && coupons.some((c) => c.code === 'WELCOME' && c.percent === 10) && coupons.some((c) => c.code === 'SUMMER' && c.percent === 25), 'Step 4: insert WELCOME at 10 and SUMMER at 25.'],
+        [sqlFailed(r, /'BAD'\s*,\s*150/, /CHECK constraint failed/), 'Step 5: try inserting BAD at 150. It should fail with CHECK constraint failed.'],
       ], 'Schema evolved, rules enforced.')
     },
   },

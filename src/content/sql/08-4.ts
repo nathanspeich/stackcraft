@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { sqlHas, steps } from '../checks'
+import { lastOk, sqlHas, steps } from '../checks'
 
 const lesson: Lesson = {
   id: 'w08d4',
@@ -34,19 +34,18 @@ WHERE oi.order_id = 5;`,
   },
   task: {
     kind: 'sql',
-    instructions: '1. List every order as id, the customer\'s name, and ordered_on, by joining orders to customers, sorted by order id.\n2. Show what is in order 5: product name and qty, by joining order_items to products.\n3. Count how many orders each customer has placed: name and n, joining customers to orders, grouped by customer, sorted by n descending then name. Customers with no orders will be missing, which is expected for an inner join.',
-    starter: '-- JOIN ... ON ...\n',
+    instructions: 'Run each step as its own statement, pressing Run after each:\n1. List every order as id, the customer\'s name, and ordered_on, by joining orders to customers, sorted by order id.\n2. Show what is in order 5: product name and qty, by joining order_items to products.\n3. Count how many orders each customer has placed: name and n, joining customers to orders, grouped by customer, sorted by n descending then name. Customers with no orders will be missing, which is expected for an inner join.',
     setup: SHOP,
     hints: ['SELECT o.id, c.name, o.ordered_on FROM orders o JOIN customers c ON c.id = o.customer_id ORDER BY o.id;', 'SELECT p.name, oi.qty FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = 5;', 'SELECT c.name, COUNT(*) AS n FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.id ORDER BY n DESC, c.name;'],
-    solution: { file: 'SELECT o.id, c.name, o.ordered_on FROM orders o JOIN customers c ON c.id = o.customer_id ORDER BY o.id;\nSELECT p.name, oi.qty FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = 5;\nSELECT c.name, COUNT(*) AS n FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.id ORDER BY n DESC, c.name;\n' },
+    solution: { commands: ['SELECT o.id, c.name, o.ordered_on FROM orders o JOIN customers c ON c.id = o.customer_id ORDER BY o.id;', 'SELECT p.name, oi.qty FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = 5;', 'SELECT c.name, COUNT(*) AS n FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.id ORDER BY n DESC, c.name;'] },
     check: (r) => {
       const sets = r.results ?? []
       const flat = (s: { values: unknown[][] }) => s.values.map((v) => v.join(':')).join('|')
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
-        [sqlHas(r, /JOIN\s+customers/) && sqlHas(r, /\bON\b/) && sets.some((s) => s.values.length === 8 && flat(s).startsWith('1:Ana Costa:2025-06-01|2:Raj Patel') && flat(s).endsWith('8:Ana Costa:2025-08-01')), 'Query 1: 8 rows starting with 1 Ana Costa 2025-06-01, joined with ON c.id = o.customer_id, sorted by order id.'],
-        [sets.some((s) => flat(s) === 'USB-C cable:3|Monitor arm:1'), 'Query 2: order 5 holds USB-C cable 3 and Monitor arm 1.'],
-        [sets.some((s) => flat(s) === 'Ana Costa:3|Raj Patel:2|Kim Lee:1|Lea Novak:1|Zoe Berg:1'), 'Query 3: Ana Costa 3, Raj Patel 2, then Kim Lee, Lea Novak, Zoe Berg with 1 each. Sam Hill has no orders and does not appear.'],
+        lastOk(r),
+        [sqlHas(r, /JOIN\s+customers/) && sqlHas(r, /\bON\b/) && sets.some((s) => s.values.length === 8 && flat(s).startsWith('1:Ana Costa:2025-06-01|2:Raj Patel') && flat(s).endsWith('8:Ana Costa:2025-08-01')), 'Step 1: 8 rows starting with 1 Ana Costa 2025-06-01, joined with ON c.id = o.customer_id, sorted by order id.'],
+        [sets.some((s) => flat(s) === 'USB-C cable:3|Monitor arm:1'), 'Step 2: order 5 holds USB-C cable 3 and Monitor arm 1.'],
+        [sets.some((s) => flat(s) === 'Ana Costa:3|Raj Patel:2|Kim Lee:1|Lea Novak:1|Zoe Berg:1'), 'Step 3: Ana Costa 3, Raj Patel 2, then Kim Lee, Lea Novak, Zoe Berg with 1 each. Sam Hill has no orders and does not appear.'],
       ], 'Your first JOIN. Tables are talking to each other.')
     },
   },

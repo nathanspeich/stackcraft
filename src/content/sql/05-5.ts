@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { sqlHas, steps } from '../checks'
+import { lastOk, sqlHas, steps } from '../checks'
 
 const lesson: Lesson = {
   id: 'w05d5',
@@ -30,20 +30,19 @@ SELECT name FROM customers WHERE city IS NULL;`,
   },
   task: {
     kind: 'sql',
-    instructions: 'Write four queries, each selecting name only:\n1. Customers with no city recorded (IS NULL).\n2. Products in the books or merch categories (use IN) priced between 20 and 40 inclusive (use BETWEEN), sorted by name.\n3. Customers whose name contains "an" (LIKE) or whose city is Oslo, sorted by name.\n4. Products that are out of stock (stock = 0) and cost more than 30.',
-    starter: '-- Four filters\n',
+    instructions: 'Run each step as its own statement, pressing Run after each. Each query selects name only:\n1. Customers with no city recorded (IS NULL).\n2. Products in the books or merch categories (use IN) priced between 20 and 40 inclusive (use BETWEEN), sorted by name.\n3. Customers whose name contains "an" (LIKE) or whose city is Oslo, sorted by name.\n4. Products that are out of stock (stock = 0) and cost more than 30.',
     setup: SHOP,
     hints: ['SELECT name FROM customers WHERE city IS NULL;', "SELECT name FROM products WHERE category IN ('books', 'merch') AND price BETWEEN 20 AND 40 ORDER BY name;", "SELECT name FROM customers WHERE name LIKE '%an%' OR city = 'Oslo' ORDER BY name;", 'SELECT name FROM products WHERE stock = 0 AND price > 30;'],
-    solution: { file: "SELECT name FROM customers WHERE city IS NULL;\nSELECT name FROM products WHERE category IN ('books', 'merch') AND price BETWEEN 20 AND 40 ORDER BY name;\nSELECT name FROM customers WHERE name LIKE '%an%' OR city = 'Oslo' ORDER BY name;\nSELECT name FROM products WHERE stock = 0 AND price > 30;\n" },
+    solution: { commands: ['SELECT name FROM customers WHERE city IS NULL;', "SELECT name FROM products WHERE category IN ('books', 'merch') AND price BETWEEN 20 AND 40 ORDER BY name;", "SELECT name FROM customers WHERE name LIKE '%an%' OR city = 'Oslo' ORDER BY name;", 'SELECT name FROM products WHERE stock = 0 AND price > 30;'] },
     check: (r) => {
       const sets = r.results ?? []
       const names = (s: { values: unknown[][] }) => s.values.map((v) => v[0]).join('|')
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
-        [sqlHas(r, /IS\s+NULL/) && sets.some((s) => names(s) === 'Sam Hill'), 'Query 1: only Sam Hill has no city. Use WHERE city IS NULL.'],
-        [sqlHas(r, /\bIN\s*\(/) && sqlHas(r, /BETWEEN/) && sets.some((s) => names(s) === 'Hoodie|Linux handbook|Python primer|SQL cookbook'), 'Query 2: Hoodie, Linux handbook, Python primer, SQL cookbook, sorted by name, using IN and BETWEEN.'],
-        [sqlHas(r, /LIKE/) && sqlHas(r, /\bOR\b/) && sets.some((s) => names(s) === 'Ana Costa|Zoe Berg'), "Query 3: Ana Costa and Zoe Berg, using LIKE '%an%' OR city = 'Oslo'."],
-        [sets.some((s) => names(s) === 'Monitor arm'), 'Query 4: only the Monitor arm is out of stock and over 30.'],
+        lastOk(r),
+        [sqlHas(r, /IS\s+NULL/) && sets.some((s) => names(s) === 'Sam Hill'), 'Step 1: only Sam Hill has no city. Use WHERE city IS NULL.'],
+        [sqlHas(r, /\bIN\s*\(/) && sqlHas(r, /BETWEEN/) && sets.some((s) => names(s) === 'Hoodie|Linux handbook|Python primer|SQL cookbook'), 'Step 2: Hoodie, Linux handbook, Python primer, SQL cookbook, sorted by name, using IN and BETWEEN.'],
+        [sqlHas(r, /LIKE/) && sqlHas(r, /\bOR\b/) && sets.some((s) => names(s) === 'Ana Costa|Zoe Berg'), "Step 3: Ana Costa and Zoe Berg, using LIKE '%an%' OR city = 'Oslo'."],
+        [sets.some((s) => names(s) === 'Monitor arm'), 'Step 4: only the Monitor arm is out of stock and over 30.'],
       ], 'AND, OR, IN, BETWEEN, LIKE, and NULL handled. Week 5 done.')
     },
   },

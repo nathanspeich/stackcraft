@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { sqlHas, steps } from '../checks'
+import { lastOk, sqlHas, steps } from '../checks'
 
 const lesson: Lesson = {
   id: 'w08d5',
@@ -33,19 +33,18 @@ WHERE o.id = 1;`,
   },
   task: {
     kind: 'sql',
-    instructions: '1. Using a LEFT JOIN, find the name of every customer who has never placed an order.\n2. For order 1, list the customer name, the product name (as product), and qty, joining order_items, orders, customers, and products.\n3. Total spending per customer: name and spent (SUM of qty times price, rounded to 2 decimals), using LEFT JOINs so every customer appears, sorted by spent from highest to lowest. Sam Hill should show NULL.',
-    starter: '-- LEFT JOIN, and a chain of joins\n',
+    instructions: 'Run each step as its own statement, pressing Run after each:\n1. Using a LEFT JOIN, find the name of every customer who has never placed an order.\n2. For order 1, list the customer name, the product name (as product), and qty, joining order_items, orders, customers, and products.\n3. Total spending per customer: name and spent (SUM of qty times price, rounded to 2 decimals), using LEFT JOINs so every customer appears, sorted by spent from highest to lowest. Sam Hill should show NULL.',
     setup: SHOP,
     hints: ['SELECT c.name FROM customers c LEFT JOIN orders o ON o.customer_id = c.id WHERE o.id IS NULL;', 'FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN customers c ON c.id = o.customer_id JOIN products p ON p.id = oi.product_id WHERE o.id = 1', 'SELECT c.name, ROUND(SUM(oi.qty * p.price), 2) AS spent FROM customers c LEFT JOIN orders o ON o.customer_id = c.id LEFT JOIN order_items oi ON oi.order_id = o.id LEFT JOIN products p ON p.id = oi.product_id GROUP BY c.id ORDER BY spent DESC;'],
-    solution: { file: 'SELECT c.name FROM customers c LEFT JOIN orders o ON o.customer_id = c.id WHERE o.id IS NULL;\nSELECT c.name, p.name AS product, oi.qty FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN customers c ON c.id = o.customer_id JOIN products p ON p.id = oi.product_id WHERE o.id = 1;\nSELECT c.name, ROUND(SUM(oi.qty * p.price), 2) AS spent FROM customers c LEFT JOIN orders o ON o.customer_id = c.id LEFT JOIN order_items oi ON oi.order_id = o.id LEFT JOIN products p ON p.id = oi.product_id GROUP BY c.id ORDER BY spent DESC;\n' },
+    solution: { commands: ['SELECT c.name FROM customers c LEFT JOIN orders o ON o.customer_id = c.id WHERE o.id IS NULL;', 'SELECT c.name, p.name AS product, oi.qty FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN customers c ON c.id = o.customer_id JOIN products p ON p.id = oi.product_id WHERE o.id = 1;', 'SELECT c.name, ROUND(SUM(oi.qty * p.price), 2) AS spent FROM customers c LEFT JOIN orders o ON o.customer_id = c.id LEFT JOIN order_items oi ON oi.order_id = o.id LEFT JOIN products p ON p.id = oi.product_id GROUP BY c.id ORDER BY spent DESC;'] },
     check: (r) => {
       const sets = r.results ?? []
       const flat = (s: { values: unknown[][] }) => s.values.map((v) => v.map((x) => (x === null ? 'NULL' : x)).join(':')).join('|')
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
-        [sqlHas(r, /LEFT\s+JOIN/) && sqlHas(r, /IS\s+NULL/) && sets.some((s) => flat(s) === 'Sam Hill'), 'Query 1: only Sam Hill, found with LEFT JOIN plus WHERE o.id IS NULL.'],
-        [sets.some((s) => flat(s) === 'Ana Costa:Mechanical keyboard:1|Ana Costa:USB-C cable:2'), 'Query 2: Ana Costa bought a Mechanical keyboard (1) and a USB-C cable (2) in order 1.'],
-        [sets.some((s) => flat(s) === 'Raj Patel:219|Ana Costa:210|Zoe Berg:73.5|Lea Novak:64|Kim Lee:39|Sam Hill:NULL'), 'Query 3: Raj Patel 219, Ana Costa 210, Zoe Berg 73.5, Lea Novak 64, Kim Lee 39, Sam Hill NULL. All six customers, spent DESC.'],
+        lastOk(r),
+        [sqlHas(r, /LEFT\s+JOIN/) && sqlHas(r, /IS\s+NULL/) && sets.some((s) => flat(s) === 'Sam Hill'), 'Step 1: only Sam Hill, found with LEFT JOIN plus WHERE o.id IS NULL.'],
+        [sets.some((s) => flat(s) === 'Ana Costa:Mechanical keyboard:1|Ana Costa:USB-C cable:2'), 'Step 2: Ana Costa bought a Mechanical keyboard (1) and a USB-C cable (2) in order 1.'],
+        [sets.some((s) => flat(s) === 'Raj Patel:219|Ana Costa:210|Zoe Berg:73.5|Lea Novak:64|Kim Lee:39|Sam Hill:NULL'), 'Step 3: Raj Patel 219, Ana Costa 210, Zoe Berg 73.5, Lea Novak 64, Kim Lee 39, Sam Hill NULL. All six customers, spent DESC.'],
       ], 'Left joins, a four-table chain, and totals per customer. Week 8 done.')
     },
   },

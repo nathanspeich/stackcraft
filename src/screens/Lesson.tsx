@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { LESSON_BY_ID, nextLesson } from '../content/lessons'
 import { TIER_LABEL, weekPlan } from '../content/curriculum'
-import type { QuizQuestion, Task } from '../content/types'
+import type { InAppTask, QuizQuestion, Task } from '../content/types'
 import { XP } from '../game/xp'
+import { BADGE_BY_ID } from '../game/badges'
+import { playSound } from '../lib/sound'
 import { isUnlocked, useStore } from '../store/useStore'
 import { useCallback } from 'react'
 import Celebration from '../components/Celebration'
@@ -27,37 +29,66 @@ function Paragraphs({ text }: { text: string }) {
   )
 }
 
+/** A list of self-check boxes. Calls onDone(true) once every box is ticked. */
+function CheckList({ steps, onDone }: { steps: string[]; onDone: (all: boolean) => void }) {
+  const [checks, setChecks] = useState<boolean[]>([])
+  return (
+    <ul className="space-y-2">
+      {steps.map((s, i) => (
+        <li key={i}>
+          <label className="flex min-h-[48px] cursor-pointer items-center gap-3 rounded-2xl border border-border bg-surface-2 px-4 py-2">
+            <input
+              type="checkbox"
+              className="size-6 shrink-0 accent-[var(--c-accent)]"
+              checked={Boolean(checks[i])}
+              onChange={(e) => {
+                const n = [...checks]; n[i] = e.target.checked; setChecks(n)
+                onDone(steps.every((_, k) => n[k]))
+              }}
+            />
+            <span className="whitespace-pre-line text-sm">{s}</span>
+          </label>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** In-app runner plus, for capstone lessons, real-machine steps the runner cannot verify. Both must pass. */
+function RunnerWithRealSteps({ task, taskKey, onPassChange }: { task: InAppTask; taskKey: string; onPassChange: (passed: boolean) => void }) {
+  const [runnerOk, setRunnerOk] = useState(false)
+  const [stepsOk, setStepsOk] = useState(!task.realSteps?.length)
+  const report = useCallback((r: boolean, s: boolean) => onPassChange(r && s), [onPassChange])
+  const onRunner = useCallback((p: boolean) => { setRunnerOk(p); report(p, stepsOk) }, [report, stepsOk])
+  const onSteps = useCallback((p: boolean) => { setStepsOk(p); report(runnerOk, p) }, [report, runnerOk])
+  const runner =
+    task.kind === 'shell' ? <ShellTask key={taskKey} task={task} onPassChange={onRunner} /> :
+    task.kind === 'python' ? <PythonTask key={taskKey} task={task} onPassChange={onRunner} /> :
+    <SqlTask key={taskKey} task={task} onPassChange={onRunner} />
+  if (!task.realSteps?.length) return runner
+  return (
+    <div className="space-y-4">
+      {runner}
+      <div className="rounded-2xl border border-capstone/40 bg-capstone/10 p-4">
+        <h3 className="font-display text-base font-bold">On your real machine</h3>
+        <p className="mb-3 mt-1 text-sm text-muted">The app cannot see your Mac, so these steps are on your honour. Tick each one when it is done.</p>
+        <CheckList steps={task.realSteps} onDone={onSteps} />
+      </div>
+    </div>
+  )
+}
+
 /** Task panel. Shell tasks run in the simulated terminal, Python in Pyodide, SQL in sql.js; paste checks arrive in phase 6. */
 function TaskPanel({ task, taskKey, onPassChange }: { task: Task; taskKey: string; onPassChange: (passed: boolean) => void }) {
-  const [checks, setChecks] = useState<boolean[]>([])
   useEffect(() => {
     if (task.kind === 'real') onPassChange(true)
   }, [task, onPassChange])
-  if (task.kind === 'shell') return <ShellTask key={taskKey} task={task} onPassChange={onPassChange} />
-  if (task.kind === 'python') return <PythonTask key={taskKey} task={task} onPassChange={onPassChange} />
-  if (task.kind === 'sql') return <SqlTask key={taskKey} task={task} onPassChange={onPassChange} />
+  if (task.kind === 'shell' || task.kind === 'python' || task.kind === 'sql') return <RunnerWithRealSteps key={taskKey} task={task} taskKey={taskKey} onPassChange={onPassChange} />
   if (task.kind === 'selfcheck') {
     return (
       <div className="space-y-3">
         <p className="whitespace-pre-line text-[15px]">{task.instructions}</p>
-        <ul className="space-y-2">
-          {task.steps.map((s, i) => (
-            <li key={i}>
-              <label className="flex min-h-[48px] cursor-pointer items-center gap-3 rounded-2xl border border-border bg-surface-2 px-4 py-2">
-                <input
-                  type="checkbox"
-                  className="size-6 shrink-0 accent-[var(--c-accent)]"
-                  checked={Boolean(checks[i])}
-                  onChange={(e) => {
-                    const n = [...checks]; n[i] = e.target.checked; setChecks(n)
-                    onPassChange(task.steps.every((_, k) => n[k]))
-                  }}
-                />
-                <span className="text-sm">{s}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
+        <CheckList steps={task.steps} onDone={onPassChange} />
       </div>
     )
   }
@@ -76,6 +107,7 @@ function Quiz({ questions, onFinish }: { questions: QuizQuestion[]; onFinish: (c
   const [correct, setCorrect] = useState(0)
   const q = questions[i]
   const answered = picked !== null
+  const pick = (k: number) => { setPicked(k); playSound(k === q.answer ? 'correct' : 'wrong') }
   const next = () => {
     if (i + 1 >= questions.length) onFinish(correct + (picked === q.answer ? 1 : 0))
     else { if (picked === q.answer) setCorrect((c) => c + 1); setI(i + 1); setPicked(null) }
@@ -92,7 +124,7 @@ function Quiz({ questions, onFinish }: { questions: QuizQuestion[]; onFinish: (c
               <button
                 type="button"
                 disabled={answered}
-                onClick={() => setPicked(k)}
+                onClick={() => pick(k)}
                 className={cx(
                   'flex min-h-[52px] w-full items-center gap-3 rounded-2xl border px-4 py-2 text-left text-sm transition',
                   state === 'idle' && 'border-border bg-surface-2 hover:border-muted',
@@ -134,8 +166,7 @@ function LessonView({ id }: { id: string }) {
   const [step, setStep] = useState<Step>('concept')
   const [taskPassed, setTaskPassed] = useState(false)
   const onPassChange = useCallback((p: boolean) => setTaskPassed(p), [])
-  const awardBadge = useStore((s) => s.awardBadge)
-  const [result, setResult] = useState<{ gained: number; weekDone: boolean; tierDone: boolean; correct: number } | null>(null)
+  const [result, setResult] = useState<{ gained: number; weekDone: boolean; tierDone: boolean; correct: number; newBadges: string[]; freezeEarned: boolean } | null>(null)
 
   useEffect(() => { window.scrollTo({ top: 0 }) }, [])
   const open = lesson ? isUnlocked(state, lesson.id) : false
@@ -164,9 +195,9 @@ function LessonView({ id }: { id: string }) {
 
   const finish = (correct: number) => {
     const r = completeLesson(lesson.id, correct, lesson.quiz.length)
-    if (lesson.badge) awardBadge(lesson.badge)
     setResult({ ...r, correct })
     setStep('done')
+    playSound(r.newBadges.length ? 'badge' : 'complete')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const plan = weekPlan(lesson.week)
@@ -224,6 +255,19 @@ function LessonView({ id }: { id: string }) {
             title={result.tierDone ? `Tier ${lesson.tier} complete!` : result.weekDone ? `Week ${lesson.week} complete!` : 'Lesson complete!'}
             subtitle={result.gained > 0 ? `+${result.gained} XP total` : 'Already completed, no extra XP'}
           />
+          {result.newBadges.length > 0 && (
+            <ul className="mx-auto mb-4 flex max-w-xs flex-wrap justify-center gap-2" aria-label="New badges">
+              {result.newBadges.map((id) => {
+                const b = BADGE_BY_ID.get(id)
+                return b ? (
+                  <li key={id} className="anim-pop flex items-center gap-2 rounded-full border border-accent/50 bg-accent/10 px-3 py-1.5 text-sm font-semibold">
+                    <span aria-hidden>{b.emoji}</span> {b.name}
+                  </li>
+                ) : null
+              })}
+            </ul>
+          )}
+          {result.freezeEarned && <p className="mb-3 text-center text-sm text-muted">🧊 Streak freeze earned. It covers one missed day automatically.</p>}
           {result.gained > 0 && (
             <ul className="mx-auto max-w-xs space-y-1 text-sm">
               <li className="flex justify-between"><span>Lesson</span><span className="font-mono">+{lesson.task.kind === 'real' ? XP.realLesson : XP.lesson} XP</span></li>
@@ -237,7 +281,7 @@ function LessonView({ id }: { id: string }) {
 
       {/* Sticky, thumb-reachable action bar */}
       {(step === 'concept' || step === 'task' || step === 'done') && (
-        <div className="fixed inset-x-0 bottom-[56px] z-30 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur md:static md:border-0 md:bg-transparent md:p-0">
+        <div className="sticky bottom-tabbar z-30 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:p-0">
           <div className="mx-auto flex max-w-3xl gap-2">
             {step === 'concept' && (
               <Button variant="track" className="w-full" onClick={() => setStep('task')}>
@@ -264,7 +308,6 @@ function LessonView({ id }: { id: string }) {
           </div>
         </div>
       )}
-      {(step === 'concept' || step === 'task') && <div className="h-24 md:hidden" aria-hidden />}
     </div>
   )
 }

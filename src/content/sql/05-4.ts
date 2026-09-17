@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { sqlHas, steps, tableRows } from '../checks'
+import { lastOk, sqlHas, steps, tableRows } from '../checks'
 
 const lesson: Lesson = {
   id: 'w05d4',
@@ -28,24 +28,23 @@ DELETE FROM orders WHERE id = 4;`,
   },
   task: {
     kind: 'sql',
-    instructions: '1. SELECT the Python primer row, then UPDATE its stock to 20.\n2. UPDATE every product in the merch category so its price goes up by 1 (use the old value: price + 1).\n3. Order 4 was cancelled. Delete its rows from order_items first, then delete the order itself.\n4. Finish with SELECT COUNT(*) FROM orders to confirm 7 remain.\nEvery UPDATE and DELETE must have a WHERE.',
-    starter: '-- Select first, then change\n',
+    instructions: 'Run each step as its own statement, pressing Run after each. Every UPDATE and DELETE must have a WHERE.\n1. SELECT the Python primer row so you see it before changing it.\n2. UPDATE its stock to 20.\n3. UPDATE every product in the merch category so its price goes up by 1 (use the old value: price + 1).\n4. Order 4 was cancelled. DELETE its rows from order_items first.\n5. DELETE the order itself from orders.\n6. SELECT COUNT(*) FROM orders to confirm 7 remain.',
     setup: SHOP,
     hints: ["UPDATE products SET stock = 20 WHERE name = 'Python primer';", "UPDATE products SET price = price + 1 WHERE category = 'merch';", 'DELETE FROM order_items WHERE order_id = 4; then DELETE FROM orders WHERE id = 4;', 'If you see FOREIGN KEY constraint failed, the items still point at the order. Delete them first.'],
-    solution: { file: "SELECT * FROM products WHERE name = 'Python primer';\nUPDATE products SET stock = 20 WHERE name = 'Python primer';\nUPDATE products SET price = price + 1 WHERE category = 'merch';\nDELETE FROM order_items WHERE order_id = 4;\nDELETE FROM orders WHERE id = 4;\nSELECT COUNT(*) FROM orders;\n" },
+    solution: { commands: ["SELECT * FROM products WHERE name = 'Python primer';", "UPDATE products SET stock = 20 WHERE name = 'Python primer';", "UPDATE products SET price = price + 1 WHERE category = 'merch';", 'DELETE FROM order_items WHERE order_id = 4;', 'DELETE FROM orders WHERE id = 4;', 'SELECT COUNT(*) FROM orders;'] },
     check: (r) => {
       const products = tableRows(r, 'products')
       const p = (id: number) => products.find((x) => x.id === id)
-      const noWhere = /\b(UPDATE|DELETE)\b(?![^;]*\bWHERE\b)[^;]*;/i.test(r.input)
+      const noWhere = (r.history ?? []).some((h) => /^\s*(UPDATE|DELETE)\b/i.test(h) && !/\bWHERE\b/i.test(h))
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
-        [!noWhere, 'Every UPDATE and DELETE needs a WHERE clause. One of yours has none.'],
-        [sqlHas(r, /SELECT[^;]*Python primer/), 'Start by selecting the Python primer row so you see what you are about to change.'],
-        [p(6)?.stock === 20, 'UPDATE the Python primer so stock = 20.'],
-        [p(7)?.price === 5 && p(8)?.price === 40 && p(1)?.price === 89, 'Raise only merch prices by 1 with SET price = price + 1 WHERE category = \'merch\' (Sticker pack 5, Hoodie 40, everything else unchanged).'],
-        [tableRows(r, 'order_items').every((x) => x.order_id !== 4), 'Delete the order_items rows where order_id = 4.'],
-        [tableRows(r, 'orders').length === 7 && !tableRows(r, 'orders').some((x) => x.id === 4), 'Delete order 4 from orders. The other 7 must remain.'],
-        [(r.rows?.[0] && Object.values(r.rows[0])[0] === 7) === true, 'Finish with SELECT COUNT(*) FROM orders, which should return 7.'],
+        lastOk(r),
+        [!noWhere, 'Every UPDATE and DELETE needs a WHERE clause. One of yours had none. Reset the database and try again.'],
+        [sqlHas(r, /SELECT[^;]*Python primer/), 'Step 1: select the Python primer row so you see what you are about to change.'],
+        [p(6)?.stock === 20, 'Step 2: UPDATE the Python primer so stock = 20.'],
+        [p(7)?.price === 5 && p(8)?.price === 40 && p(1)?.price === 89, 'Step 3: raise only merch prices by 1 with SET price = price + 1 WHERE category = \'merch\' (Sticker pack 5, Hoodie 40, everything else unchanged). If you ran it twice, reset the database.'],
+        [tableRows(r, 'order_items').every((x) => x.order_id !== 4), 'Step 4: delete the order_items rows where order_id = 4.'],
+        [tableRows(r, 'orders').length === 7 && !tableRows(r, 'orders').some((x) => x.id === 4), 'Step 5: delete order 4 from orders. The other 7 must remain.'],
+        [(r.rows?.[0] && Object.values(r.rows[0])[0] === 7) === true, 'Step 6: finish with SELECT COUNT(*) FROM orders, which should return 7.'],
       ], 'Changed exactly what you meant to, nothing more.')
     },
   },

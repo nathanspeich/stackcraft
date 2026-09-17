@@ -49,14 +49,14 @@ export default function Layout() {
       </aside>
 
       <div className="flex min-h-dvh flex-col">
-        <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-28 pt-safe md:px-8 md:pb-10">
+        <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-tabbar pt-safe md:px-8 md:pb-10">
           <div className="pt-4 md:pt-8">
             <Outlet />
           </div>
         </main>
 
         {/* Bottom tab bar on phones */}
-        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface/95 backdrop-blur md:hidden pb-safe" aria-label="Main">
+        <nav className="fixed inset-x-0 bottom-0 z-40 h-[var(--tabbar-h)] border-t border-border bg-surface/95 backdrop-blur md:hidden pb-safe" aria-label="Main">
           <ul className="grid grid-cols-4">
             {tabs.map(({ to, label, Icon, end }) => (
               <li key={to}>
@@ -64,7 +64,7 @@ export default function Layout() {
                   to={to}
                   end={end}
                   className={({ isActive }) =>
-                    cx('flex min-h-[56px] flex-col items-center justify-center gap-0.5 text-[11px] font-semibold', isActive ? 'text-accent' : 'text-muted')
+                    cx('flex h-[56px] flex-col items-center justify-center gap-0.5 text-[11px] font-semibold', isActive ? 'text-accent' : 'text-muted')
                   }
                 >
                   <Icon />

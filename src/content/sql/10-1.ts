@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { sqlHas, steps } from '../checks'
+import { lastOk, sqlHas, steps } from '../checks'
 
 const lesson: Lesson = {
   id: 'w10d1',
@@ -33,19 +33,18 @@ FROM customers c;`,
   },
   task: {
     kind: 'sql',
-    instructions: '1. Products with a price above the average price: name and price, most expensive first.\n2. Names of customers who have bought the Hoodie (product 8), using IN with a subquery over orders joined to order_items, sorted by name.\n3. Every customer\'s name with n_orders from a correlated subquery, sorted by n_orders descending then name.',
-    starter: '-- Subqueries\n',
+    instructions: 'Run each step as its own statement, pressing Run after each:\n1. Products with a price above the average price: name and price, most expensive first.\n2. Names of customers who have bought the Hoodie (product 8), using IN with a subquery over orders joined to order_items, sorted by name.\n3. Every customer\'s name with n_orders from a correlated subquery, sorted by n_orders descending then name.',
     setup: SHOP,
     hints: ['WHERE price > (SELECT AVG(price) FROM products) ORDER BY price DESC', 'WHERE id IN (SELECT o.customer_id FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE oi.product_id = 8)', 'SELECT name, (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS n_orders FROM customers c ORDER BY n_orders DESC, name;'],
-    solution: { file: 'SELECT name, price FROM products WHERE price > (SELECT AVG(price) FROM products) ORDER BY price DESC;\nSELECT name FROM customers WHERE id IN (SELECT o.customer_id FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE oi.product_id = 8) ORDER BY name;\nSELECT name, (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS n_orders FROM customers c ORDER BY n_orders DESC, name;\n' },
+    solution: { commands: ['SELECT name, price FROM products WHERE price > (SELECT AVG(price) FROM products) ORDER BY price DESC;', 'SELECT name FROM customers WHERE id IN (SELECT o.customer_id FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE oi.product_id = 8) ORDER BY name;', 'SELECT name, (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS n_orders FROM customers c ORDER BY n_orders DESC, name;'] },
     check: (r) => {
       const sets = r.results ?? []
       const flat = (s: { values: unknown[][] }) => s.values.map((v) => v.join(':')).join('|')
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
-        [sqlHas(r, /\(\s*SELECT\s+AVG\(price\)/) && sets.some((s) => flat(s) === 'Mechanical keyboard:89|Monitor arm:45|Hoodie:39'), 'Query 1: Mechanical keyboard 89, Monitor arm 45, Hoodie 39, using (SELECT AVG(price) FROM products).'],
-        [sqlHas(r, /\bIN\s*\(\s*SELECT/) && sets.some((s) => flat(s) === 'Kim Lee|Raj Patel'), 'Query 2: Kim Lee and Raj Patel bought the Hoodie. Use IN (SELECT ...).'],
-        [sqlHas(r, /\(\s*SELECT\s+COUNT\(\*\)[^)]*customer_id\s*=\s*c\.id/) && sets.some((s) => flat(s) === 'Ana Costa:3|Raj Patel:2|Kim Lee:1|Lea Novak:1|Zoe Berg:1|Sam Hill:0'), 'Query 3: Ana Costa 3, Raj Patel 2, Kim Lee 1, Lea Novak 1, Zoe Berg 1, Sam Hill 0, from a correlated subquery.'],
+        lastOk(r),
+        [sqlHas(r, /\(\s*SELECT\s+AVG\(price\)/) && sets.some((s) => flat(s) === 'Mechanical keyboard:89|Monitor arm:45|Hoodie:39'), 'Step 1: Mechanical keyboard 89, Monitor arm 45, Hoodie 39, using (SELECT AVG(price) FROM products).'],
+        [sqlHas(r, /\bIN\s*\(\s*SELECT/) && sets.some((s) => flat(s) === 'Kim Lee|Raj Patel'), 'Step 2: Kim Lee and Raj Patel bought the Hoodie. Use IN (SELECT ...).'],
+        [sqlHas(r, /\(\s*SELECT\s+COUNT\(\*\)[^)]*customer_id\s*=\s*c\.id/) && sets.some((s) => flat(s) === 'Ana Costa:3|Raj Patel:2|Kim Lee:1|Lea Novak:1|Zoe Berg:1|Sam Hill:0'), 'Step 3: Ana Costa 3, Raj Patel 2, Kim Lee 1, Lea Novak 1, Zoe Berg 1, Sam Hill 0, from a correlated subquery.'],
       ], 'Questions feeding questions.')
     },
   },

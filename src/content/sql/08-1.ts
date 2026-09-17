@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { lastRows, sqlHas, steps } from '../checks'
+import { lastOk, lastRows, steps } from '../checks'
 
 const lesson: Lesson = {
   id: 'w08d1',
@@ -32,19 +32,18 @@ SELECT COUNT(*) AS customers, COUNT(city) AS with_city FROM customers;`,
   },
   task: {
     kind: 'sql',
-    instructions: 'Write one query against products that returns a single row with these five columns, named with AS exactly like this: n (the number of products), cheapest (MIN price), priciest (MAX price), avg_price (AVG price rounded to 2 decimals), and units (SUM of stock).',
-    starter: 'SELECT\n  -- five aggregates here\nFROM products;\n',
+    instructions: 'Build up one query against products in steps, running it after each addition to see the new column appear. The final version returns a single row with five columns named with AS exactly like this:\n1. n, the number of products (COUNT).\n2. cheapest, the MIN price.\n3. priciest, the MAX price.\n4. avg_price, the AVG price rounded to 2 decimals.\n5. units, the SUM of stock.\nThe last statement you run should have all five.',
     setup: SHOP,
-    hints: ['COUNT(*) AS n, MIN(price) AS cheapest, MAX(price) AS priciest', 'ROUND(AVG(price), 2) AS avg_price', 'SUM(stock) AS units'],
-    solution: { file: 'SELECT COUNT(*) AS n, MIN(price) AS cheapest, MAX(price) AS priciest, ROUND(AVG(price), 2) AS avg_price, SUM(stock) AS units FROM products;\n' },
+    hints: ['SELECT COUNT(*) AS n FROM products; then add the others one by one, separated by commas.', 'MIN(price) AS cheapest, MAX(price) AS priciest', 'ROUND(AVG(price), 2) AS avg_price', 'SUM(stock) AS units'],
+    solution: { commands: ['SELECT COUNT(*) AS n FROM products;', 'SELECT COUNT(*) AS n, MIN(price) AS cheapest, MAX(price) AS priciest FROM products;', 'SELECT COUNT(*) AS n, MIN(price) AS cheapest, MAX(price) AS priciest, ROUND(AVG(price), 2) AS avg_price, SUM(stock) AS units FROM products;'] },
     check: (r) => {
       const row = lastRows(r)[0] ?? {}
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
+        lastOk(r),
         [lastRows(r).length === 1, 'The query should return exactly one row.'],
         [row.n === 8, 'n should be 8: COUNT(*) AS n'],
-        [row.cheapest === 4 && row.priciest === 89, 'cheapest should be 4 and priciest 89: MIN(price) and MAX(price).'],
-        [row.avg_price === 33.88 && sqlHas(r, /ROUND\s*\(\s*AVG/), 'avg_price should be 33.88: ROUND(AVG(price), 2) AS avg_price'],
+        [row.cheapest === 4 && row.priciest === 89, 'cheapest should be 4 and priciest 89: MIN(price) AS cheapest, MAX(price) AS priciest.'],
+        [row.avg_price === 33.88 && /ROUND\s*\(\s*AVG/i.test(r.input), 'avg_price should be 33.88: ROUND(AVG(price), 2) AS avg_price'],
         [row.units === 500, 'units should be 500: SUM(stock) AS units'],
       ], 'Eight rows became one line of facts.')
     },

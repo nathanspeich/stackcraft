@@ -5,6 +5,8 @@ import { TIER_WEEKS } from '../content/curriculum'
 import type { Tier, Track } from '../content/types'
 import { XP } from '../game/xp'
 import { advanceStreak, emptyStreak, type StreakState } from '../game/streak'
+import { schedule, type Grade } from '../game/sm2'
+import { availableCards, isDue } from '../game/deck'
 import { today } from '../lib/dates'
 
 export interface LessonProgress {
@@ -13,11 +15,15 @@ export interface LessonProgress {
   quizTotal: number
 }
 
+/** SM-2 state for one card. See src/game/sm2.ts. */
 export interface CardSchedule {
-  /** SM-2 fields, filled in during phase 5. */
+  /** Days until the next review at the time it was scheduled. 0 means due again today. */
   interval: number
+  /** Ease factor, 1.3 or more. */
   ease: number
+  /** Next review day, YYYY-MM-DD. */
   due: string
+  /** Successful reviews in a row. */
   reps: number
 }
 
@@ -52,9 +58,12 @@ export interface StackcraftState {
   /** Lesson id whose completion celebration is pending. */
   lastCompleted: string | null
 
-  completeLesson: (id: string, quizCorrect: number, quizTotal: number) => { gained: number; weekDone: boolean; tierDone: boolean }
+  completeLesson: (id: string, quizCorrect: number, quizTotal: number) => { gained: number; weekDone: boolean; tierDone: boolean; newBadges: string[]; freezeEarned: boolean }
   unlockLesson: (id: string) => void
+  /** Count card reviews toward XP and the streak. */
   recordReview: (n?: number) => void
+  /** Apply a flashcard grade with SM-2. countReview adds XP and streak credit (false for repeat ratings in one session). */
+  rateCard: (cardId: string, grade: Grade, countReview?: boolean) => CardSchedule
   awardBadge: (id: string) => void
   setTheme: (theme: Settings['theme']) => void
   setSound: (on: boolean) => void
@@ -84,7 +93,7 @@ export const useStore = create<StackcraftState>()(
 
       completeLesson: (id, quizCorrect, quizTotal) => {
         const lesson = LESSON_BY_ID.get(id)
-        if (!lesson) return { gained: 0, weekDone: false, tierDone: false }
+        if (!lesson) return { gained: 0, weekDone: false, tierDone: false, newBadges: [], freezeEarned: false }
         const s = get()
         const alreadyDone = Boolean(s.completed[id])
         const now = new Date().toISOString()
@@ -113,12 +122,11 @@ export const useStore = create<StackcraftState>()(
         const streak = act.lessons === 0 && act.reviews < 10 ? advanceStreak(s.streak, day) : s.streak
 
         const badges = { ...s.badges }
-        const earn = (b: string) => { if (!badges[b]) badges[b] = now }
+        const newBadges: string[] = []
+        const earn = (b: string) => { if (!badges[b]) { badges[b] = now; newBadges.push(b) } }
         earn('first-lesson')
-        if (streak.current >= 7) earn('streak-7')
-        if (streak.current >= 30) earn('streak-30')
-        if (streak.current >= 100) earn('streak-100')
-        if (streak.current >= 200) earn('streak-200')
+        if (lesson.badge) earn(lesson.badge)
+        for (const b of streakBadges(streak.current)) earn(b)
         for (const track of ['linux', 'python', 'sql'] as Track[]) {
           if (lessonsForTrack(track).filter((l) => l.tier === 1).every((l) => completed[l.id])) earn(`track-${track}-1`)
         }
@@ -136,7 +144,7 @@ export const useStore = create<StackcraftState>()(
           badges,
           lastCompleted: id,
         })
-        return { gained, weekDone, tierDone }
+        return { gained, weekDone, tierDone, newBadges, freezeEarned: streak.freezes > s.streak.freezes }
       },
 
       unlockLesson: (id) => set((s) => (s.unlocked.includes(id) ? s : { unlocked: [...s.unlocked, id] })),
@@ -147,11 +155,23 @@ export const useStore = create<StackcraftState>()(
         const act = s.activity[day] ?? { lessons: 0, reviews: 0 }
         const reviews = act.reviews + n
         const crossed = act.lessons === 0 && act.reviews < 10 && reviews >= 10
+        const streak = crossed ? advanceStreak(s.streak, day) : s.streak
+        const badges = { ...s.badges }
+        if (crossed) for (const b of streakBadges(streak.current)) if (!badges[b]) badges[b] = new Date().toISOString()
         set({
           xp: s.xp + n * XP.cardReview,
           activity: { ...s.activity, [day]: { ...act, reviews } },
-          streak: crossed ? advanceStreak(s.streak, day) : s.streak,
+          streak,
+          badges,
         })
+      },
+
+      rateCard: (cardId, grade, countReview = true) => {
+        const day = today()
+        const next = schedule(get().cards[cardId], grade, day)
+        set((s) => ({ cards: { ...s.cards, [cardId]: next } }))
+        if (countReview) get().recordReview(1)
+        return next
       },
 
       awardBadge: (id) => set((s) => (s.badges[id] ? s : { badges: { ...s.badges, [id]: new Date().toISOString() } })),
@@ -189,6 +209,17 @@ export function trackMastery(s: StackcraftState, track: Track, tier?: Tier) {
   return { done, total: ls.length, pct: ls.length ? done / ls.length : 0 }
 }
 
-export function dueCards(s: StackcraftState, day = today()) {
-  return Object.values(s.cards).filter((c) => c.due <= day).length
+/** Cards ready to review now: unlocked by a completed lesson and never reviewed or due by today. */
+export function dueCards(s: Pick<StackcraftState, 'completed' | 'cards'>, day = today()) {
+  return availableCards(s).filter((c) => isDue(s, c, day)).length
+}
+
+/** Streak badges earned at or below a streak length. */
+export function streakBadges(current: number): string[] {
+  const out: string[] = []
+  if (current >= 7) out.push('streak-7')
+  if (current >= 30) out.push('streak-30')
+  if (current >= 100) out.push('streak-100')
+  if (current >= 200) out.push('streak-200')
+  return out
 }

@@ -80,6 +80,11 @@ export interface InAppTask {
   /** Reference solution, used by tests and by the "show solution" link. */
   solution?: { commands?: string[]; file?: string }
   check: (result: RunResult) => CheckResult
+  /**
+   * Tier 1 capstone: steps to do on the learner's real machine that the runner cannot verify,
+   * shown as self-check boxes under the runner. The task passes once the checker passes and every box is ticked.
+   */
+  realSteps?: string[]
 }
 
 /** Tier 1 fallback when the runner cannot verify (sudo, systemctl): a self-check box. */
@@ -128,4 +133,18 @@ export interface Lesson {
   badge?: string
   /** True for lessons whose content is written in a later build phase. */
   placeholder?: boolean
+}
+
+/** Flashcard generated from a lesson. Tier 2 and 3 cards join the same decks once their tier is unlocked. */
+export interface Card {
+  /** Stable id, like 'linux-01' or 'sql-14'. Schedules are keyed by it, so never renumber. */
+  id: string
+  track: Track
+  tier: Tier
+  /** Lesson the card is drawn from; the card unlocks when that lesson is completed. */
+  lesson: string
+  /** Prompt side: a command, keyword, or concept. */
+  front: string
+  /** Answer side: what it does or the definition, one or two short sentences. */
+  back: string
 }

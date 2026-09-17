@@ -1,21 +1,25 @@
-// Shared SQL runner logic on top of sql.js (SQLite in WebAssembly, with window functions).
+// Shared SQL console logic on top of sql.js (SQLite in WebAssembly, with window functions).
 // Used by the browser SqlTask panel and the Node test harness.
+//
+// A session is one open database that lives for the whole task, like the sqlite3
+// command-line tool: statements run one at a time and their effects stay until
+// the learner resets the database.
 import type { Database, SqlJsStatic, SqlValue } from 'sql.js'
 import type { RunResult } from '../content/types'
 
 export interface ResultSet { columns: string[]; values: SqlValue[][] }
+export type SqlItem = { kind: 'rows'; set: ResultSet } | { kind: 'message'; text: string }
 
-export interface SqlRunResult {
-  /** Result sets and row-count messages, in statement order. */
-  items: ({ kind: 'rows'; set: ResultSet } | { kind: 'message'; text: string })[]
+/** One statement the learner ran, with what came back. */
+export interface SqlEntry {
+  sql: string
+  items: SqlItem[]
   error?: string
-  tables: Record<string, Record<string, unknown>[]>
-  schema: Record<string, string>
 }
 
 const MAX_ROWS = 500
 
-/** Split a script into statements on semicolons outside quotes and comments (keeps trigger bodies naive). */
+/** Split text into statements on semicolons outside quotes and comments (keeps trigger bodies naive). */
 export function splitSql(script: string): string[] {
   const out: string[] = []
   let cur = ''
@@ -50,47 +54,33 @@ function snapshot(db: Database) {
   return { tables, schema }
 }
 
-/** Run setup then the script on a fresh in-memory database. */
-export function runSql(SQL: SqlJsStatic, setup: string, script: string): SqlRunResult {
-  const db = new SQL.Database()
-  const items: SqlRunResult['items'] = []
+/** Run one statement on an open database. */
+function runStatement(db: Database, stmt: string): SqlEntry {
+  const items: SqlItem[] = []
   let error: string | undefined
   try {
-    db.exec('PRAGMA foreign_keys = ON')
-    if (setup.trim()) db.exec(setup)
-  } catch (e) {
-    error = `Lesson setup failed: ${(e as Error).message}`
-  }
-  if (!error) {
-    for (const stmt of splitSql(script)) {
-      try {
-        const upper = stmt.trimStart().slice(0, 12).toUpperCase()
-        const returnsRows = /^(SELECT|WITH|EXPLAIN|PRAGMA|VALUES)/.test(upper) || /\bRETURNING\b/i.test(stmt)
-        if (returnsRows) {
-          const res = db.exec(stmt)
-          if (res.length === 0) items.push({ kind: 'rows', set: { columns: [], values: [] } })
-          for (const set of res) items.push({ kind: 'rows', set: { columns: set.columns, values: set.values.slice(0, MAX_ROWS) } })
-        } else {
-          db.run(stmt)
-          const n = db.getRowsModified()
-          const verb = upper.split(/\s+/)[0]
-          items.push({ kind: 'message', text: ['INSERT', 'UPDATE', 'DELETE', 'REPLACE'].includes(verb) ? `${verb}: ${n} row${n === 1 ? '' : 's'} affected` : `${verb} ok` })
-        }
-      } catch (e) {
-        error = (e as Error).message
-        items.push({ kind: 'message', text: `Error: ${error}` })
-        break
-      }
+    const upper = stmt.trimStart().slice(0, 12).toUpperCase()
+    const returnsRows = /^(SELECT|WITH|EXPLAIN|PRAGMA|VALUES)/.test(upper) || /\bRETURNING\b/i.test(stmt)
+    if (returnsRows) {
+      const res = db.exec(stmt)
+      if (res.length === 0) items.push({ kind: 'rows', set: { columns: [], values: [] } })
+      for (const set of res) items.push({ kind: 'rows', set: { columns: set.columns, values: set.values.slice(0, MAX_ROWS) } })
+    } else {
+      db.run(stmt)
+      const n = db.getRowsModified()
+      const verb = upper.split(/\s+/)[0]
+      items.push({ kind: 'message', text: ['INSERT', 'UPDATE', 'DELETE', 'REPLACE'].includes(verb) ? `${verb}: ${n} row${n === 1 ? '' : 's'} affected` : `${verb} ok` })
     }
+  } catch (e) {
+    error = (e as Error).message
+    items.push({ kind: 'message', text: `Error: ${error}` })
   }
-  const snap = snapshot(db)
-  db.close()
-  return { items, error, ...snap }
+  return { sql: stmt, items, error }
 }
 
-/** Render results as plain text, used for the checker's output field and for tests. */
-export function renderText(r: SqlRunResult): string {
-  return r.items
+/** Render one entry's results as plain text, used for the checker's output field and for tests. */
+export function renderText(items: SqlItem[]): string {
+  return items
     .map((it) => {
       if (it.kind === 'message') return it.text
       const { columns, values } = it.set
@@ -102,20 +92,73 @@ export function renderText(r: SqlRunResult): string {
     .join('\n\n')
 }
 
-export function toRunResult(runs: { sql: string; result: SqlRunResult }[]): RunResult {
-  const last = runs[runs.length - 1]
-  const sets = last ? last.result.items.filter((i): i is { kind: 'rows'; set: ResultSet } => i.kind === 'rows').map((i) => i.set) : []
-  const lastSet = sets[sets.length - 1]
-  const rows = lastSet ? lastSet.values.map((row) => Object.fromEntries(lastSet.columns.map((c, i) => [c, row[i]]))) : []
-  return {
-    input: last?.sql ?? '',
-    output: last ? renderText(last.result) : '',
-    error: last?.result.error,
-    history: runs.map((r) => r.sql),
-    outputs: runs.map((r) => renderText(r.result)),
-    rows,
-    results: sets,
-    tables: last?.result.tables ?? {},
-    schema: last?.result.schema ?? {},
+export class SqlSession {
+  private db: Database
+  /** Every statement run since the last reset, oldest first. */
+  entries: SqlEntry[] = []
+  /** Set when the lesson's own setup script failed, which is a content bug. */
+  setupError: string | null = null
+
+  private SQL: SqlJsStatic
+  private setup: string
+
+  constructor(SQL: SqlJsStatic, setup: string) {
+    this.SQL = SQL
+    this.setup = setup
+    this.db = this.open()
+  }
+
+  private open(): Database {
+    const db = new this.SQL.Database()
+    this.setupError = null
+    try {
+      db.exec('PRAGMA foreign_keys = ON')
+      if (this.setup.trim()) db.exec(this.setup)
+    } catch (e) {
+      this.setupError = `Lesson setup failed: ${(e as Error).message}`
+    }
+    return db
+  }
+
+  /** Throw away every change and rebuild the lesson's starting database. */
+  reset() {
+    this.db.close()
+    this.db = this.open()
+    this.entries = []
+  }
+
+  /** Run what the learner typed. Each statement inside becomes its own entry. Returns the new entries. */
+  run(text: string): SqlEntry[] {
+    const added: SqlEntry[] = []
+    for (const stmt of splitSql(text)) {
+      const entry = runStatement(this.db, stmt)
+      this.entries.push(entry)
+      added.push(entry)
+    }
+    return added
+  }
+
+  /** What the checker sees: the whole sequence of statements and results, plus the database as it stands now. */
+  toRunResult(): RunResult {
+    const last = this.entries[this.entries.length - 1]
+    const sets = this.entries.flatMap((e) => e.items.filter((i): i is { kind: 'rows'; set: ResultSet } => i.kind === 'rows').map((i) => i.set))
+    const lastSet = sets[sets.length - 1]
+    const rows = lastSet ? lastSet.values.map((row) => Object.fromEntries(lastSet.columns.map((c, i) => [c, row[i]]))) : []
+    const snap = snapshot(this.db)
+    return {
+      input: last?.sql ?? '',
+      output: last ? renderText(last.items) : '',
+      error: last?.error ?? this.setupError ?? undefined,
+      history: this.entries.map((e) => e.sql),
+      outputs: this.entries.map((e) => renderText(e.items)),
+      rows,
+      results: sets,
+      tables: snap.tables,
+      schema: snap.schema,
+    }
+  }
+
+  close() {
+    this.db.close()
   }
 }

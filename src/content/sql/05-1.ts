@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { column, lastCols, lastRows, sqlHas, steps } from '../checks'
+import { column, lastCols, lastOk, lastRows, sqlHas, steps } from '../checks'
 
 const lesson: Lesson = {
   id: 'w05d1',
@@ -28,20 +28,19 @@ SELECT COUNT(*) FROM orders;`,
   },
   task: {
     kind: 'sql',
-    instructions: 'This lesson\'s database is a small online shop. Write four statements:\n1. List the table names from sqlite_master (type = \'table\').\n2. Select every column from products.\n3. Select only name and city from customers.\n4. Count the rows in orders.\nRun and read each result table.',
-    starter: '-- The shop database is loaded before your script runs\n',
+    instructions: 'This lesson\'s database is a small online shop. Run each step as its own statement, pressing Run after each, and read the result before moving on:\n1. List the table names from sqlite_master (WHERE type = \'table\').\n2. Select every column from products.\n3. Select only name and city from customers.\n4. Count the rows in orders. Make this your last statement.',
     setup: SHOP,
     hints: ["SELECT name FROM sqlite_master WHERE type = 'table';", 'SELECT * FROM products;', 'SELECT name, city FROM customers;', 'SELECT COUNT(*) FROM orders;'],
-    solution: { file: "SELECT name FROM sqlite_master WHERE type = 'table';\nSELECT * FROM products;\nSELECT name, city FROM customers;\nSELECT COUNT(*) FROM orders;\n" },
+    solution: { commands: ["SELECT name FROM sqlite_master WHERE type = 'table';", 'SELECT * FROM products;', 'SELECT name, city FROM customers;', 'SELECT COUNT(*) FROM orders;'] },
     check: (r) => {
       const sets = r.results ?? []
       const has = (pred: (s: { columns: string[]; values: unknown[][] }) => boolean) => sets.some(pred)
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
-        [has((s) => s.values.map((v) => v[0]).join(',') === 'customers,products,orders,order_items'), "Statement 1: SELECT name FROM sqlite_master WHERE type = 'table' should list the four tables."],
-        [has((s) => s.columns.length === 5 && s.values.length === 8 && s.columns.includes('stock')), 'Statement 2: SELECT * FROM products should return 8 rows with 5 columns.'],
-        [has((s) => s.columns.map((c) => c.toLowerCase()).join(',') === 'name,city' && s.values.length === 6), 'Statement 3: SELECT name, city FROM customers should return 6 rows with exactly those two columns.'],
-        [sqlHas(r, /COUNT\(\*\)/) && lastCols(r).length === 1 && column(r, lastCols(r)[0])[0] === '8' && lastRows(r).length === 1, 'Statement 4: SELECT COUNT(*) FROM orders should be last and return 8.'],
+        lastOk(r),
+        [has((s) => s.values.map((v) => v[0]).join(',') === 'customers,products,orders,order_items'), "Step 1: SELECT name FROM sqlite_master WHERE type = 'table' should list the four tables."],
+        [has((s) => s.columns.length === 5 && s.values.length === 8 && s.columns.includes('stock')), 'Step 2: SELECT * FROM products should return 8 rows with 5 columns.'],
+        [has((s) => s.columns.map((c) => c.toLowerCase()).join(',') === 'name,city' && s.values.length === 6), 'Step 3: SELECT name, city FROM customers should return 6 rows with exactly those two columns.'],
+        [sqlHas(r, /COUNT\(\*\)/) && lastCols(r).length === 1 && column(r, lastCols(r)[0])[0] === '8' && lastRows(r).length === 1, 'Step 4: SELECT COUNT(*) FROM orders should be your last statement and return 8.'],
       ], 'Four questions asked, four answers read. That is SQL.')
     },
   },

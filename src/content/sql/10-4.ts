@@ -1,6 +1,6 @@
 import type { Lesson } from '../types'
 import { SHOP } from './shop'
-import { sqlHas, steps, tableRows } from '../checks'
+import { lastOk, steps, tableRows } from '../checks'
 
 const lesson: Lesson = {
   id: 'w10d4',
@@ -31,23 +31,27 @@ ROLLBACK;                        -- phew`,
   },
   task: {
     kind: 'sql',
-    instructions: '1. In one transaction (BEGIN ... COMMIT): lower the stock of product 1 by one, insert order 9 for customer 3 dated 2025-08-05 with status new, and insert an order_items row for order 9, product 1, qty 1.\n2. In a second transaction: run UPDATE products SET price = 0 with no WHERE, then ROLLBACK it.\n3. Finish with three SELECTs to prove it: COUNT(*) FROM orders (9), stock FROM products WHERE id = 1 (11), and MIN(price) FROM products (still 4).',
-    starter: '-- Two transactions: one committed, one rolled back\n',
+    instructions: 'Run each step as its own statement, pressing Run after each. The database keeps the transaction open between statements, just like a real sqlite3 session.\n1. BEGIN a transaction.\n2. Lower the stock of product 1 by one.\n3. Insert order 9 for customer 3 dated 2025-08-05 with status new.\n4. Insert an order_items row for order 9, product 1, qty 1.\n5. COMMIT.\n6. BEGIN a second transaction.\n7. Run UPDATE products SET price = 0 with no WHERE. Yes, really.\n8. ROLLBACK to undo it.\n9. Prove it with three SELECTs: COUNT(*) FROM orders (9), stock FROM products WHERE id = 1 (11), and MIN(price) FROM products (still 4).',
     setup: SHOP,
-    hints: ['BEGIN; UPDATE products SET stock = stock - 1 WHERE id = 1; INSERT INTO orders (id, customer_id, ordered_on, status) VALUES (9, 3, \'2025-08-05\', \'new\'); INSERT INTO order_items VALUES (9, 1, 1); COMMIT;', 'BEGIN; UPDATE products SET price = 0; ROLLBACK;', 'SELECT COUNT(*) FROM orders; SELECT stock FROM products WHERE id = 1; SELECT MIN(price) FROM products;'],
-    solution: { file: "BEGIN;\nUPDATE products SET stock = stock - 1 WHERE id = 1;\nINSERT INTO orders (id, customer_id, ordered_on, status) VALUES (9, 3, '2025-08-05', 'new');\nINSERT INTO order_items VALUES (9, 1, 1);\nCOMMIT;\n\nBEGIN;\nUPDATE products SET price = 0;\nROLLBACK;\n\nSELECT COUNT(*) FROM orders;\nSELECT stock FROM products WHERE id = 1;\nSELECT MIN(price) FROM products;\n" },
+    hints: ['BEGIN; then the UPDATE, two INSERTs, and COMMIT, each as its own statement.', "INSERT INTO orders (id, customer_id, ordered_on, status) VALUES (9, 3, '2025-08-05', 'new'); and INSERT INTO order_items VALUES (9, 1, 1);", 'BEGIN; UPDATE products SET price = 0; ROLLBACK; then check with SELECT MIN(price) FROM products;'],
+    solution: { commands: ['BEGIN;', 'UPDATE products SET stock = stock - 1 WHERE id = 1;', "INSERT INTO orders (id, customer_id, ordered_on, status) VALUES (9, 3, '2025-08-05', 'new');", 'INSERT INTO order_items VALUES (9, 1, 1);', 'COMMIT;', 'BEGIN;', 'UPDATE products SET price = 0;', 'ROLLBACK;', 'SELECT COUNT(*) FROM orders;', 'SELECT stock FROM products WHERE id = 1;', 'SELECT MIN(price) FROM products;'] },
     check: (r) => {
+      const h = r.history ?? []
       const orders = tableRows(r, 'orders')
       const p1 = tableRows(r, 'products').find((p) => p.id === 1)
       const minPrice = Math.min(...tableRows(r, 'products').map((p) => Number(p.price)))
       const sets = r.results ?? []
       const single = (n: number) => sets.some((s) => s.values.length === 1 && s.values[0].length === 1 && s.values[0][0] === n)
+      const iBegin = h.findIndex((s) => /^\s*BEGIN\b/i.test(s))
+      const iCommit = h.findIndex((s, i) => i > iBegin && /^\s*COMMIT\b/i.test(s))
+      const iZero = h.findIndex((s) => /SET\s+price\s*=\s*0\b/i.test(s) && !/\bWHERE\b/i.test(s))
+      const iRollback = h.findIndex((s, i) => i > iZero && /^\s*ROLLBACK\b/i.test(s))
       return steps([
-        [!r.error, `Your script stopped with an error: ${r.error}`],
-        [sqlHas(r, /BEGIN[\s\S]*COMMIT/), 'Wrap the order in BEGIN ... COMMIT.'],
-        [orders.length === 9 && orders.some((o) => o.id === 9 && o.customer_id === 3) && tableRows(r, 'order_items').some((i) => i.order_id === 9 && i.product_id === 1) && p1?.stock === 11, 'Inside the first transaction: stock of product 1 down to 11, order 9 for customer 3, and its order_items row.'],
-        [sqlHas(r, /SET\s+price\s*=\s*0\s*;/) && sqlHas(r, /ROLLBACK/) && minPrice === 4, 'Second transaction: UPDATE products SET price = 0 followed by ROLLBACK, so prices stay intact (MIN 4).'],
-        [single(9) && single(11) && single(4), 'Finish with the three SELECTs returning 9, 11, and 4.'],
+        lastOk(r),
+        [iBegin >= 0 && iCommit > iBegin, 'Steps 1 and 5: wrap the order in BEGIN ... COMMIT, each run as its own statement.'],
+        [orders.length === 9 && orders.some((o) => o.id === 9 && o.customer_id === 3) && tableRows(r, 'order_items').some((i) => i.order_id === 9 && i.product_id === 1) && p1?.stock === 11, 'Steps 2 to 4, inside the first transaction: stock of product 1 down to 11, order 9 for customer 3, and its order_items row. If the numbers drifted, reset the database and redo it.'],
+        [iZero >= 0 && iRollback > iZero && minPrice === 4, 'Steps 6 to 8: BEGIN, UPDATE products SET price = 0, then ROLLBACK, so prices stay intact (MIN 4).'],
+        [single(9) && single(11) && single(4), 'Step 9: finish with the three SELECTs returning 9, 11, and 4.'],
       ], 'Committed what mattered, rolled back the mistake.')
     },
   },
