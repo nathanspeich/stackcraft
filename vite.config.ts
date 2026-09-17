@@ -33,6 +33,16 @@ export default defineConfig({
         navigateFallback: '/stackcraft/index.html',
         runtimeCaching: [
           {
+            // Pyodide runtime, loaded lazily by Python lessons. Cached so lessons work offline after the first load.
+            urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/pyodide\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'pyodide',
+              expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'StaleWhileRevalidate',
             options: { cacheName: 'google-fonts-stylesheets' },

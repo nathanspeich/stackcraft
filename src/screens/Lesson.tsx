@@ -8,6 +8,7 @@ import { isUnlocked, useStore } from '../store/useStore'
 import { useCallback } from 'react'
 import Celebration from '../components/Celebration'
 import ShellTask from '../components/ShellTask'
+import PythonTask from '../components/PythonTask'
 import CodeBlock from '../components/CodeBlock'
 import { Button, Card, LinkButton, TrackPill } from '../components/ui'
 import { cx } from '../lib/cx'
@@ -25,13 +26,14 @@ function Paragraphs({ text }: { text: string }) {
   )
 }
 
-/** Task panel. Shell tasks run in the simulated terminal; python and sql runners arrive in phases 3 and 4, paste checks in phase 6. */
+/** Task panel. Shell tasks run in the simulated terminal, Python tasks in Pyodide; the sql runner arrives in phase 4, paste checks in phase 6. */
 function TaskPanel({ task, taskKey, onPassChange }: { task: Task; taskKey: string; onPassChange: (passed: boolean) => void }) {
   const [checks, setChecks] = useState<boolean[]>([])
   useEffect(() => {
-    if (task.kind !== 'selfcheck' && task.kind !== 'shell') onPassChange(true)
+    if (task.kind !== 'selfcheck' && task.kind !== 'shell' && task.kind !== 'python') onPassChange(true)
   }, [task, onPassChange])
   if (task.kind === 'shell') return <ShellTask key={taskKey} task={task} onPassChange={onPassChange} />
+  if (task.kind === 'python') return <PythonTask key={taskKey} task={task} onPassChange={onPassChange} />
   if (task.kind === 'selfcheck') {
     return (
       <div className="space-y-3">

@@ -95,7 +95,7 @@ export default function Terminal({ shell, onRun, className, banner }: TerminalPr
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start + text.length, start + text.length) })
   }
 
-  const keyBtn = 'min-h-[40px] min-w-[40px] rounded-lg bg-surface-2 px-2 font-mono text-sm text-text active:brightness-125'
+  const keyBtn = 'min-h-[44px] min-w-[44px] shrink-0 rounded-lg bg-surface-2 px-2 font-mono text-sm text-text active:brightness-125'
 
   return (
     <div className={cx('overflow-hidden rounded-2xl border border-border bg-bg', className)}>

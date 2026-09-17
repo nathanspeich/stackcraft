@@ -4,6 +4,16 @@ import { readdirSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import type { Lesson } from '../src/content/types'
 import { shellForTask as build } from '../src/shell/taskRunner'
+import { runPython, toRunResult, type PyodideLike } from '../src/python/run'
+
+let pyodide: PyodideLike | null = null
+async function py(): Promise<PyodideLike> {
+  if (!pyodide) {
+    const { loadPyodide } = await import('pyodide')
+    pyodide = (await loadPyodide()) as unknown as PyodideLike
+  }
+  return pyodide
+}
 
 const dirs = ['linux', 'python', 'sql', 'capstone']
 let fails = 0
@@ -37,6 +47,24 @@ for (const dir of dirs) {
         }
         const r = task.check({ ...last, ...sh.snapshotForChecker() })
         if (!r.pass) problems.push(`solution does not pass: ${r.message}`)
+      }
+    }
+    if (lesson.task.kind === 'python') {
+      const task = lesson.task
+      const p = await py()
+      const runOne = async (code: string) => {
+        const argv = task.argv ?? []
+        const stdin = task.stdin ?? ''
+        const result = await runPython(p, { code, stdin, argv, files: task.seed })
+        return toRunResult([{ code, stdin, argv, result }])
+      }
+      const r0 = await runOne(task.starter ?? '')
+      if (task.check(r0).pass) problems.push('checker passes on the starter code')
+      if (!task.solution?.file) problems.push('no solution file')
+      else {
+        const r = await runOne(task.solution.file)
+        const c = task.check(r)
+        if (!c.pass) problems.push(`solution does not pass: ${c.message}\n    output: ${JSON.stringify(r.output.slice(0, 300))}`)
       }
     }
     if (problems.length) { fails++; console.log(`FAIL ${lesson.id} ${lesson.title}\n  - ${problems.join('\n  - ')}`) }

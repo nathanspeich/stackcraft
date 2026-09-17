@@ -35,3 +35,14 @@ export const HOME_SEED: Record<string, string> = {
   '/home/learner/photos/': '',
   '/home/learner/downloads/setup.log': 'installing...\ndone\n',
 }
+
+/* ---------- Python helpers ---------- */
+
+/** True if the last program's output contains the text or matches the pattern. */
+export const outHas = (r: RunResult, what: string | RegExp) => (typeof what === 'string' ? r.output.includes(what) : what.test(r.output))
+/** True if the learner's code contains the text or pattern. */
+export const codeHas = (r: RunResult, what: string | RegExp) => (typeof what === 'string' ? r.input.includes(what) : what.test(r.input))
+/** The last run finished without a traceback. */
+export const noError = (r: RunResult) => !r.error
+/** Output lines, trailing whitespace trimmed. */
+export const outLines = (r: RunResult) => r.output.replace(/\s+$/, '').split('\n').map((l) => l.replace(/\s+$/, ''))

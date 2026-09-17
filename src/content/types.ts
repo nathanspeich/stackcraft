@@ -63,6 +63,10 @@ export interface InAppTask {
   cwd?: string
   /** Shell lessons: extra machine state, such as processes or services. */
   machine?: Partial<ShellState>
+  /** Python lessons: default text fed to input() calls, one line per call. Shown as an editable box when set. */
+  stdin?: string
+  /** Python lessons: default command-line arguments. Shown as an editable box when set. */
+  argv?: string[]
   /** Short hints shown one at a time on request. */
   hints?: string[]
   /** Reference solution, used by tests and by the "show solution" link. */
