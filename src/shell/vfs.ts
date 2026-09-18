@@ -6,7 +6,9 @@ export type FsNode = FileNode | DirNode
 
 export class FsError extends Error {}
 
-const now = () => Date.now()
+let lastNow = 0
+/** Strictly increasing timestamps so ls -t can order files created in the same millisecond. */
+const now = () => { lastNow = Math.max(Date.now(), lastNow + 1); return lastNow }
 
 export function normalize(path: string, cwd: string, home: string): string {
   let p = path

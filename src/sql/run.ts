@@ -19,7 +19,16 @@ export interface SqlEntry {
 
 const MAX_ROWS = 500
 
-/** Split text into statements on semicolons outside quotes and comments (keeps trigger bodies naive). */
+/** True while a CREATE TRIGGER statement is still inside its BEGIN ... END body, so its inner semicolons must not split it. */
+function insideTriggerBody(cur: string): boolean {
+  if (!/^\s*CREATE\s+(TEMP\s+|TEMPORARY\s+)?TRIGGER\b/i.test(cur)) return false
+  const bare = cur.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"/g, "''")
+  const opens = (bare.match(/\b(BEGIN|CASE)\b/gi) ?? []).length
+  const closes = (bare.match(/\bEND\b/gi) ?? []).length
+  return opens > closes
+}
+
+/** Split text into statements on semicolons outside quotes and comments. A CREATE TRIGGER body (BEGIN ... END) stays one statement. */
 export function splitSql(script: string): string[] {
   const out: string[] = []
   let cur = ''
@@ -30,7 +39,12 @@ export function splitSql(script: string): string[] {
     if (c === '-' && script[i + 1] === '-') { while (i < script.length && script[i] !== '\n') i++; cur += '\n'; continue }
     if (c === '/' && script[i + 1] === '*') { const end = script.indexOf('*/', i + 2); i = end < 0 ? script.length : end + 1; continue }
     if (c === "'" || c === '"' || c === '`') { q = c; cur += c; continue }
-    if (c === ';') { if (cur.trim()) out.push(cur.trim()); cur = ''; continue }
+    if (c === ';') {
+      if (insideTriggerBody(cur)) { cur += c; continue }
+      if (cur.trim()) out.push(cur.trim())
+      cur = ''
+      continue
+    }
     cur += c
   }
   if (cur.trim()) out.push(cur.trim())

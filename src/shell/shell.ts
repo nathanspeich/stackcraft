@@ -1,7 +1,8 @@
 // Simulated Linux shell: tokenizer, expansions, pipelines, redirection, and a
-// small bash interpreter (variables, if, for, while, functions, exit codes).
+// small bash interpreter (variables, if, for, while, case, functions, arrays,
+// getopts, here-docs, traps, set -e, exit codes).
 import { VFS, FsError, normalize, dirname, seedFs, type FsNode } from './vfs'
-import { COMMANDS, type CmdResult } from './commands'
+import { COMMANDS, HOOKS, type CmdResult } from './commands'
 import { MAN } from './man'
 import type { ShellState } from '../content/types'
 
@@ -14,8 +15,16 @@ class ShellBreak extends ControlFlow {}
 class ShellContinue extends ControlFlow {}
 const fromCf = (e: ControlFlow, code: number): CmdResult => ({ out: e.out, err: e.err, code, seq: e.seq })
 export class Incomplete extends Error {}
+/** set -u: a variable was used before it was set. */
+export class UnboundVariable extends Error {}
 
-export interface Redir { kind: '>' | '>>' | '<' | '2>' | '2>>' | '2>&1' | '&>'; target?: string }
+export interface Redir { kind: '>' | '>>' | '<' | '<<' | '<<<' | '2>' | '2>>' | '2>&1' | '>&2' | '1>&2' | '&>'; target?: string; /** Here-doc body. */ body?: string }
+
+export interface ShellOptions { errexit: boolean; nounset: boolean; pipefail: boolean; xtrace: boolean }
+const defaultOptions = (): ShellOptions => ({ errexit: false, nounset: false, pipefail: false, xtrace: false })
+
+/** Sentinels used to carry a here-doc body inside a statement string. */
+const HD = '\u0003'
 
 const isSpace = (c: string) => c === ' ' || c === '\t' || c === '\n'
 
@@ -47,6 +56,17 @@ export class Shell {
   }
   exported = new Set(['HOME', 'USER', 'SHELL', 'PATH', 'PWD', 'HOSTNAME', 'LANG', 'TERM'])
   functions: Record<string, string[]> = {}
+  /** Bash arrays, kept apart from the string environment. $name reads element 0. */
+  arrays: Record<string, string[]> = {}
+  /** Saved outer values of variables declared with local, one frame per running function. */
+  localFrames: Record<string, string | undefined>[] = []
+  opts: ShellOptions = defaultOptions()
+  traps: Record<string, string> = {}
+  /** Depth of if/while/until conditions and negated pipelines, where set -e is suspended. */
+  inCondition = 0
+  /** getopts: position inside a clustered flag group like -abc. */
+  optSub = 0
+  lastBgPid = 0
   positional: string[] = []
   scriptName = 'bash'
   history: string[] = []
@@ -69,6 +89,7 @@ export class Shell {
     const root = 'root'
     for (const d of ['/bin', '/usr/bin', '/usr/local/bin', '/etc', '/var/log', '/tmp', '/home', '/root', '/proc', '/dev', '/usr/share/man', '/opt', '/srv']) v.mkdir(d, { parents: true, owner: root })
     v.mkdir(HOME, { parents: true })
+    const tmp = v.get('/tmp'); if (tmp) tmp.mode = 0o1777
     for (const name of Object.keys(COMMANDS)) if (!BUILTIN_ONLY.has(name)) v.writeFile('/usr/bin/' + name, '#!builtin\n', { owner: root, mode: 0o755 })
     v.writeFile('/etc/passwd', 'root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nsshd:x:105:65534::/run/sshd:/usr/sbin/nologin\nlearner:x:1000:1000:Learner:/home/learner:/bin/bash\n', { owner: root })
     v.writeFile('/etc/shadow', 'root:$6$rounds=5000$saltsalt$hashhashhashhash:19600:0:99999:7:::\nlearner:$6$rounds=5000$saltsalt$hashhashhashhash:19600:0:99999:7:::\n', { owner: root, mode: 0o640 })
@@ -91,9 +112,9 @@ export class Shell {
   get prompt() { return `${this.user === 'root' ? 'root' : USER}@${HOSTNAME}:${this.displayCwd()}${this.user === 'root' ? '#' : '$'} ` }
   displayCwd() { return this.cwd === HOME ? '~' : this.cwd.startsWith(HOME + '/') ? '~' + this.cwd.slice(HOME.length) : this.cwd }
 
-  canRead(n: FsNode) { return this.user === 'root' || n.owner === this.user ? Boolean(n.mode & 0o400) || this.user === 'root' : Boolean(n.mode & 0o004) }
-  canWrite(n: FsNode) { return this.user === 'root' || (n.owner === this.user ? Boolean(n.mode & 0o200) : Boolean(n.mode & 0o002)) }
-  canExec(n: FsNode) { return n.owner === this.user ? Boolean(n.mode & 0o100) : Boolean(n.mode & 0o011) || (this.user === 'root' && Boolean(n.mode & 0o111)) }
+  canRead(n: FsNode) { return HOOKS.access?.(this, n, 'r') ?? (this.user === 'root' || n.owner === this.user ? Boolean(n.mode & 0o400) || this.user === 'root' : Boolean(n.mode & 0o004)) }
+  canWrite(n: FsNode) { return HOOKS.access?.(this, n, 'w') ?? (this.user === 'root' || (n.owner === this.user ? Boolean(n.mode & 0o200) : Boolean(n.mode & 0o002))) }
+  canExec(n: FsNode) { return HOOKS.access?.(this, n, 'x') ?? (n.owner === this.user ? Boolean(n.mode & 0o100) : Boolean(n.mode & 0o011) || (this.user === 'root' && Boolean(n.mode & 0o111))) }
 
   readFile(p: string): string {
     const abs = this.path(p)
@@ -115,6 +136,7 @@ export class Shell {
       if (!this.canWrite(parent)) throw new FsError(`${p}: Permission denied`)
     }
     this.vfs.writeFile(abs, content, { append, owner: this.user })
+    if (!n) HOOKS.created?.(this, abs, this.vfs.get(abs)!)
   }
 
   /* ---------- public entry points ---------- */
@@ -134,6 +156,7 @@ export class Shell {
       else if (e instanceof ShellBreak || e instanceof ShellContinue) res = fromCf(e, 0)
       else throw e
     }
+    if (res.seq === undefined) res.seq = res.out + res.err
     this.lastStatus = res.code
     this.state.lastStatus = res.code
     const output = res.seq ?? res.out + res.err
@@ -203,24 +226,52 @@ export class Shell {
           i = next
           let ran = false
           for (const b of branches) {
-            const c = this.execStatements(splitStatements(b.cond))
+            const c = this.condition(b.cond)
             add(c)
             if (c.code === 0) { combine(this.execStatements(b.body)); ran = true; break }
           }
           if (!ran) { if (elseBody) combine(this.execStatements(elseBody)); else { code = 0; this.lastStatus = 0 } }
           continue
         }
+        if (s.startsWith('case ')) {
+          const { word, clauses, next } = parseCase(stmts, i)
+          i = next
+          const value = this.expandWords(word).join(' ')
+          let matched = false
+          for (const clause of clauses) {
+            const hit = clause.patterns.some((p) => globRegex(this.expandPattern(p)).test(value))
+            if (hit) { combine(this.execStatements(clause.body)); matched = true; break }
+          }
+          if (!matched) { code = 0; this.lastStatus = 0 }
+          continue
+        }
         if (s.startsWith('for ') || s.startsWith('while ') || s.startsWith('until ')) {
-          const { header, body, next, stdinFile } = parseLoop(stmts, i)
+          const { header, body, next, stdinFile, tail } = parseLoop(stmts, i)
           i = next
           const savedStdin = this.env.STDIN
           if (stdinFile) this.env.STDIN = this.readFile(stdinFile)
+          // "done | cmd" or "done > file": the loop's output is collected and handed on.
+          let loopOut = ''
           const runBody = () => {
-            try { combine(this.execStatements(body)); return true }
+            try {
+              const r = this.execStatements(body)
+              if (tail) { loopOut += r.out; err += r.err; seq += r.err; code = r.code; this.lastStatus = r.code }
+              else combine(r)
+              return true
+            }
             catch (e) { if (e instanceof ShellContinue) { add(fromCf(e, code)); return true } if (e instanceof ShellBreak) { add(fromCf(e, code)); return false } throw e }
           }
           try {
-            if (header.startsWith('for ')) {
+            const cfor = header.match(/^for\s*\(\((.*?);(.*?);(.*?)\)\)$/)
+            if (cfor) {
+              // C-style loop: for ((i=0; i<3; i++))
+              evalArith(cfor[1], this)
+              let guard = 0
+              while (guard++ < 10000 && (cfor[2].trim() === '' || evalArith(cfor[2], this) !== 0)) {
+                if (!runBody()) break
+                evalArith(cfor[3], this)
+              }
+            } else if (header.startsWith('for ')) {
               const m = header.match(/^for\s+([A-Za-z_]\w*)(?:\s+in\s*(.*))?$/)
               if (!m) { err += `bash: syntax error near 'for'\n`; seq += `bash: syntax error near 'for'\n`; code = 2; continue }
               const items = m[2] === undefined ? [...this.positional] : this.expandWords(m[2])
@@ -230,7 +281,7 @@ export class Shell {
               const cond = header.slice(6)
               let guard = 0
               while (guard++ < 10000) {
-                const c = this.execStatements(splitStatements(cond))
+                const c = this.condition(cond)
                 add(c)
                 if ((c.code === 0) === isUntil) break
                 if (!runBody()) break
@@ -239,6 +290,10 @@ export class Shell {
             }
           } finally {
             if (stdinFile) this.env.STDIN = savedStdin ?? ''
+          }
+          if (tail) {
+            if (tail.startsWith('|')) combine(this.execPipelineInner(tail.slice(1).trim(), false, loopOut))
+            else combine(this.execSimple(`cat ${tail}`, loopOut))
           }
           continue
         }
@@ -255,7 +310,7 @@ export class Shell {
           i = next
           continue
         }
-        if (['then', 'do', 'done', 'fi', 'else', '}'].includes(s) || s.startsWith('elif ')) {
+        if (['then', 'do', 'done', 'fi', 'else', '}', 'esac', ';;'].includes(s) || s.startsWith('elif ')) {
           const msg = `bash: syntax error near unexpected token '${s.split(' ')[0]}'\n`
           err += msg; seq += msg
           code = 2
@@ -278,12 +333,30 @@ export class Shell {
         }
         combine(this.execList(s))
         i++
+        if (code !== 0 && this.inCondition === 0) {
+          if (this.traps.ERR) { const t = this.execScript(this.traps.ERR); add(t) }
+          if (this.opts.errexit) throw new ShellExit(code)
+        }
       }
     } catch (e) {
       if (e instanceof ControlFlow) { e.out = out + e.out; e.err = err + e.err; e.seq = seq + e.seq }
       throw e
     }
     return { out, err, code, seq }
+  }
+
+  /** Run an if/while/until condition with set -e suspended, as bash does. */
+  condition(text: string): CmdResult {
+    this.inCondition++
+    try { return this.execStatements(splitStatements(text)) } finally { this.inCondition-- }
+  }
+
+  /** Expand variables inside a case pattern without globbing or splitting it. */
+  expandPattern(p: string): string {
+    const t = p.trim()
+    if (/^"(.*)"$/.test(t)) return tokenize(t, this).words[0] ?? ''
+    if (/^'(.*)'$/.test(t)) return t.slice(1, -1)
+    return t.replace(/\$\{?([A-Za-z_]\w*|\d)\}?/g, (_m, name) => this.getVar(name))
   }
 
   /** A statement: pipelines joined by && and ||. */
@@ -308,49 +381,85 @@ export class Shell {
   execPipeline(text: string): CmdResult {
     let t = text.trim()
     let negate = false
-    if (t.startsWith('! ')) { negate = true; t = t.slice(2) }
+    if (t.startsWith('! ')) { negate = true; t = t.slice(2); this.inCondition++ }
+    try { return this.execPipelineInner(t, negate) } finally { if (negate) this.inCondition-- }
+  }
+
+  private execPipelineInner(t: string, negate: boolean, initialStdin = ''): CmdResult {
     let background = false
     if (t.endsWith('&') && !t.endsWith('&&')) { background = true; t = t.slice(0, -1).trim() }
     const cmds = splitPipes(t)
-    let stdin = ''
+    let stdin = initialStdin
     let out = ''
     let err = ''
     let code = 0
     if (background) {
       const pid = this.nextPid++
       const id = this.jobs.length + 1
+      this.lastBgPid = pid
       this.jobs.push({ id, pid, cmd: t })
       this.state.processes.push({ pid, user: this.user, cmd: t, cpu: 0, mem: 0.1 })
       return { out: `[${id}] ${pid}\n`, err: '', code: 0 }
     }
     let seq = ''
+    let failed = 0
     for (let k = 0; k < cmds.length; k++) {
       this.tty = k === cmds.length - 1 && !/(^|[^2&])>/.test(cmds[k].replace(/'[^']*'|"[^"]*"/g, ''))
       const r = this.execSimple(cmds[k], stdin)
       this.tty = true
       err += r.err
       code = r.code
+      if (r.code !== 0) failed = r.code
       if (k === cmds.length - 1) { out += r.out; seq += r.seq ?? r.err + r.out }
       else { stdin = r.out; seq += r.err }
     }
+    if (this.opts.pipefail && code === 0 && failed) code = failed
     if (negate) code = code === 0 ? 1 : 0
     return { out, err, code, seq }
   }
 
   execSimple(text: string, stdin: string): CmdResult {
+    // Array assignment: name=(a b c), name+=(d), name[i]=value
+    const arr = text.match(/^\s*([A-Za-z_]\w*)(\+?=)\((.*)\)\s*$/s)
+    if (arr) {
+      let items: string[]
+      try { items = this.expandWords(arr[3]) } catch (e) { return { out: '', err: `bash: ${(e as Error).message}\n`, code: 2 } }
+      this.arrays[arr[1]] = arr[2] === '+=' ? [...(this.arrays[arr[1]] ?? []), ...items] : items
+      delete this.env[arr[1]]
+      return { out: '', err: '', code: 0 }
+    }
+    const elem = text.match(/^\s*([A-Za-z_]\w*)\[([^\]]+)\]=(.*)$/s)
+    if (elem) {
+      const idx = evalArith(elem[2], this)
+      const list = this.arrays[elem[1]] ?? (this.arrays[elem[1]] = [])
+      let value: string
+      try { value = this.expandWords(elem[3]).join(' ') } catch (e) { return { out: '', err: `bash: ${(e as Error).message}\n`, code: 2 } }
+      list[idx < 0 ? list.length + idx : idx] = value
+      return { out: '', err: '', code: 0 }
+    }
+    // Arithmetic command: (( i++ )) succeeds when the value is non-zero
+    const arith = text.match(/^\s*\(\((.*)\)\)\s*$/s)
+    if (arith) {
+      try { return { out: '', err: '', code: evalArith(arith[1], this) !== 0 ? 0 : 1 } }
+      catch (e) { return { out: '', err: `bash: ((: ${(e as Error).message}\n`, code: 1 } }
+    }
     let words: string[]
     let redirs: Redir[]
     try {
       ;({ words, redirs } = tokenize(text, this))
     } catch (e) {
+      if (e instanceof UnboundVariable) { const ex = new ShellExit(1); ex.err = `bash: ${e.message}\n`; ex.seq = ex.err; throw ex }
       return { out: '', err: `bash: ${(e as Error).message}\n`, code: 2 }
     }
-    // stdin redirection
+    // stdin redirection: a file, a here-doc, or a here-string
     for (const r of redirs) {
       if (r.kind === '<' && r.target !== undefined) {
         try { stdin = this.readFile(r.target) } catch (e) { return { out: '', err: `bash: ${(e as Error).message}\n`, code: 1 } }
       }
+      if (r.kind === '<<' && r.body !== undefined) stdin = r.body
+      if (r.kind === '<<<' && r.target !== undefined) stdin = r.target + '\n'
     }
+    const trace = this.opts.xtrace && words.length ? `+ ${words.join(' ')}\n` : ''
     // assignments
     while (words.length && /^[A-Za-z_]\w*=/.test(words[0])) {
       const [name, ...rest] = words[0].split('=')
@@ -361,11 +470,14 @@ export class Shell {
     let res: CmdResult
     if (words.length === 0) res = { out: '', err: '', code: 0 }
     else res = this.invoke(words, stdin)
+    if (trace) res = { ...res, err: trace + res.err, seq: trace + (res.seq ?? res.err + res.out) }
     // output redirection
     for (const r of redirs) {
-      if (r.kind === '<') continue
+      if (r.kind === '<' || r.kind === '<<' || r.kind === '<<<') continue
       if (r.kind === '2>&1') { res = { ...res, out: res.out + res.err, err: '' }; continue }
+      if (r.kind === '>&2' || r.kind === '1>&2') { res = { ...res, err: res.err + res.out, out: '' }; continue }
       if (r.target === undefined) continue
+      if (r.target === '/dev/null') { res = r.kind === '2>' || r.kind === '2>>' ? { ...res, err: '' } : r.kind === '&>' ? { ...res, out: '', err: '' } : { ...res, out: '' }; continue }
       try {
         if (r.kind === '>' || r.kind === '>>') { this.writeFile(r.target, res.out, r.kind === '>>'); res = { ...res, out: '' } }
         else if (r.kind === '2>' || r.kind === '2>>') { this.writeFile(r.target, res.err, r.kind === '2>>'); res = { ...res, err: '' } }
@@ -382,9 +494,14 @@ export class Shell {
     if (this.functions[name]) {
       const saved = this.positional
       this.positional = args
+      this.localFrames.push({})
       try { return this.execStatements(this.functions[name]) }
       catch (e) { if (e instanceof ShellReturn) return fromCf(e, e.code); throw e }
-      finally { this.positional = saved }
+      finally {
+        this.positional = saved
+        const frame = this.localFrames.pop() ?? {}
+        for (const [k, v] of Object.entries(frame)) { if (v === undefined) delete this.env[k]; else this.env[k] = v }
+      }
     }
     if (args.includes('--help') && MAN[name] && !['echo', 'printf', 'grep', 'man'].includes(name)) {
       return { out: MAN[name] + '\n', err: '', code: 0 }
@@ -431,18 +548,45 @@ export class Shell {
     if (first.startsWith('#!') && !/(bash|\/sh|\/env sh|\/env bash)/.test(first)) {
       return { out: '', err: `bash: ${abs}: only bash and sh scripts run in this terminal (shebang: ${first})\n`, code: 126 }
     }
-    // Scripts run in a child context: cwd and variables do not leak back out.
+    // Scripts run in a child context: cwd, variables, options, and traps do not leak back out.
     const savedCwd = this.cwd
     const savedEnv = { ...this.env }
     const savedFns = { ...this.functions }
+    const savedArrays = { ...this.arrays }
+    const savedOpts = { ...this.opts }
+    const savedTraps = { ...this.traps }
+    const savedFrames = this.localFrames
+    this.opts = { ...defaultOptions(), xtrace: this.opts.xtrace }
+    this.traps = {}
+    this.localFrames = []
     this.env.STDIN = stdin
+    let res: CmdResult | undefined
     try {
-      return this.execScript(content, args, abs)
+      res = this.execScript(content, args, abs)
+      return res
     } finally {
+      if (this.traps.EXIT) {
+        try {
+          const t = this.execScript(this.traps.EXIT)
+          if (res) { res.out += t.out; res.err += t.err; res.seq = (res.seq ?? '') + (t.seq ?? t.out + t.err) }
+        } catch { /* a trap that exits is ignored */ }
+      }
       this.cwd = savedCwd
       this.env = savedEnv
       this.functions = savedFns
+      this.arrays = savedArrays
+      this.opts = savedOpts
+      this.traps = savedTraps
+      this.localFrames = savedFrames
     }
+  }
+
+  /** Declare variables local to the running function (called by the local builtin). */
+  declareLocal(name: string, value?: string) {
+    const frame = this.localFrames[this.localFrames.length - 1]
+    if (frame && !(name in frame)) frame[name] = this.env[name]
+    if (value !== undefined) this.env[name] = value
+    else if (frame) this.env[name] = ''
   }
 
   /* ---------- expansion helpers used by commands ---------- */
@@ -458,8 +602,16 @@ export class Shell {
     if (name === 'PWD') return this.cwd
     if (name === 'RANDOM') return String(Math.floor(Math.random() * 32768))
     if (name === 'UID') return this.user === 'root' ? '0' : '1000'
-    return this.env[name] ?? ''
+    if (name === '$') return '1183'
+    if (name === '!') return String(this.lastBgPid)
+    if (name === 'LINENO') return '1'
+    if (this.env[name] !== undefined) return this.env[name]
+    if (this.arrays[name]) return this.arrays[name][0] ?? ''
+    if (this.opts.nounset) throw new UnboundVariable(`${name}: unbound variable`)
+    return ''
   }
+
+  isSet(name: string) { return this.env[name] !== undefined || this.arrays[name] !== undefined }
 
   throwExit(code: number): never { throw new ShellExit(code) }
   throwReturn(code: number): never { throw new ShellReturn(code) }
@@ -499,7 +651,7 @@ export class Shell {
 }
 
 /** Commands that are shell builtins and have no /usr/bin entry. */
-export const BUILTIN_ONLY = new Set(['cd', 'export', 'unset', 'source', '.', 'exit', 'return', 'history', 'alias', 'local', 'shift', 'break', 'continue', 'read', 'set', 'type', 'help', 'true', 'false', 'test', '[', '[[', 'exec', 'jobs', 'fg', 'bg', 'wait', 'pushd', 'popd', 'let', 'declare'])
+export const BUILTIN_ONLY = new Set(['cd', 'export', 'unset', 'source', '.', 'exit', 'return', 'history', 'alias', 'local', 'shift', 'break', 'continue', 'read', 'set', 'type', 'help', 'true', 'false', 'test', '[', '[[', 'exec', 'jobs', 'fg', 'bg', 'wait', 'pushd', 'popd', 'let', 'declare', 'getopts', 'trap', 'readonly', 'mapfile', 'readarray', 'umask', 'shopt', 'command', 'builtin', 'eval', 'times', 'ulimit'])
 
 function commonPrefix(list: string[]) {
   let p = list[0]
@@ -515,6 +667,28 @@ export function splitStatements(src: string): string[] {
   let cur = ''
   let q: string | null = null
   let depth = 0
+  /** Here-docs opened on the current line, collected once the line ends. */
+  let pendingDocs: { delim: string; quoted: boolean; strip: boolean; slot: number }[] = []
+  let slots: string[] = []
+  const finishLine = (i: number): number => {
+    // Consume here-doc bodies that follow the line just finished.
+    for (const d of pendingDocs) {
+      let body = ''
+      let found = false
+      while (i < src.length) {
+        const nl = src.indexOf('\n', i)
+        const line = src.slice(i, nl < 0 ? src.length : nl)
+        i = nl < 0 ? src.length : nl + 1
+        const cmp = d.strip ? line.replace(/^\t+/, '') : line
+        if (cmp === d.delim) { found = true; break }
+        body += (d.strip ? line.replace(/^\t+/, '') : line) + '\n'
+      }
+      if (!found) throw new Incomplete()
+      slots[d.slot] = HD + (d.quoted ? 'q' : 'e') + HD + body + HD
+    }
+    pendingDocs = []
+    return i
+  }
   for (let i = 0; i < src.length; i++) {
     const c = src[i]
     if (q) {
@@ -526,21 +700,43 @@ export function splitStatements(src: string): string[] {
     if (c === '\\') { cur += c + (src[++i] ?? ''); continue }
     if (c === "'" || c === '"' || c === '`') { q = c; cur += c; continue }
     if (c === '#' && (cur === '' || isSpace(cur[cur.length - 1]))) { while (i < src.length && src[i] !== '\n') i++; i--; continue }
+    if (c === '<' && src[i + 1] === '<' && src[i + 2] !== '<' && src[i - 1] !== '<' && depth === 0) {
+      // Here-doc operator: remember the delimiter, leave a slot marker in the statement.
+      let j = i + 2
+      let strip = false
+      if (src[j] === '-') { strip = true; j++ }
+      while (src[j] === ' ' || src[j] === '\t') j++
+      let delim = ''
+      let quoted = false
+      if (src[j] === "'" || src[j] === '"') { const qc = src[j]; const end = src.indexOf(qc, j + 1); delim = src.slice(j + 1, end < 0 ? src.length : end); quoted = true; j = end < 0 ? src.length : end + 1 }
+      else { while (j < src.length && !isSpace(src[j]) && src[j] !== ';' && src[j] !== '|' && src[j] !== '&') { if (src[j] === '\\') j++; else delim += src[j]; j++ } }
+      const slot = slots.length
+      slots.push('')
+      pendingDocs.push({ delim, quoted, strip, slot })
+      cur += `<<${HD}${slot}${HD}`
+      i = j - 1
+      continue
+    }
     if (c === '(' ) { depth++; cur += c; continue }
     if (c === ')' ) { depth = Math.max(0, depth - 1); cur += c; continue }
     if ((c === '\n' || c === ';') && depth === 0) {
-      if (c === ';' && src[i + 1] === ';') { i++ }
+      if (c === ';' && src[i + 1] === ';') { raw.push(cur.trim()); raw.push(';;'); cur = ''; i++; continue }
       raw.push(cur.trim()); cur = ''
+      if (c === '\n' && pendingDocs.length) i = finishLine(i + 1) - 1
       continue
     }
     if (c === '&' && src[i + 1] !== '&' && src[i - 1] !== '&' && src[i - 1] !== '>' && depth === 0) { cur += c; raw.push(cur.trim()); cur = ''; continue }
     cur += c
   }
-  if (q) throw new Incomplete()
+  if (q || depth > 0) throw new Incomplete()
   raw.push(cur.trim())
+  if (pendingDocs.length) finishLine(src.length)
   const out: string[] = []
-  for (let s of raw) {
+  for (let s0 of raw) {
+    // Put here-doc bodies back in place of their slot markers.
+    let s = s0.replace(new RegExp(`<<${HD}(\\d+)${HD}`, 'g'), (_m, n) => '<<' + slots[Number(n)])
     if (!s) continue
+    if (s === ';;') { out.push(s); continue }
     // Leading keywords that may share a line with the next command.
     let m: RegExpMatchArray | null
     while ((m = s.match(/^(then|do|else)\s+(.+)$/))) { out.push(m[1]); s = m[2].trim() }
@@ -564,8 +760,8 @@ export function splitStatements(src: string): string[] {
 function isIncomplete(stmts: string[]): boolean {
   let depth = 0
   for (const s of stmts) {
-    if (s === 'if' || s.startsWith('if ') || s.startsWith('for ') || s.startsWith('while ') || s.startsWith('until ') || s === '{') depth++
-    else if (s === 'fi' || s === 'done' || s === '}') depth--
+    if (s === 'if' || s.startsWith('if ') || s.startsWith('for ') || s.startsWith('while ') || s.startsWith('until ') || s.startsWith('case ') || s === '{') depth++
+    else if (s === 'fi' || s === 'done' || /^done\s*[|>]/.test(s) || s === '}' || s === 'esac') depth--
   }
   return depth > 0
 }
@@ -596,6 +792,34 @@ function parseIf(stmts: string[], start: number) {
   return { branches, elseBody, next: i }
 }
 
+/** case WORD in PATTERN) body ;; ... esac. Clauses are split by the ';;' statements. */
+function parseCase(stmts: string[], start: number) {
+  const m = stmts[start].match(/^case\s+(.+?)\s+in(?:\s+(.*))?$/)
+  const word = m?.[1] ?? ''
+  const clauses: { patterns: string[]; body: string[] }[] = []
+  let cur: { patterns: string[]; body: string[] } | null = null
+  let depth = 0
+  const queue: string[] = m?.[2]?.trim() ? [m[2].trim()] : []
+  let i = start + 1
+  for (;;) {
+    const s = queue.length ? queue.shift()! : i < stmts.length ? stmts[i++] : undefined
+    if (s === undefined) break
+    if (s.startsWith('case ')) depth++
+    if (s === 'esac') {
+      if (depth === 0) { if (cur) clauses.push(cur); return { word, clauses, next: i } }
+      depth--
+    }
+    if (depth === 0 && s === ';;') { if (cur) clauses.push(cur); cur = null; continue }
+    if (depth === 0 && cur === null) {
+      const pm = s.match(/^\(?\s*([^()]*?)\s*\)\s*(.*)$/)
+      if (pm) { cur = { patterns: pm[1].split('|').map((p) => p.trim()), body: [] }; if (pm[2].trim()) queue.unshift(pm[2].trim()); continue }
+    }
+    if (cur) cur.body.push(s)
+  }
+  if (cur) clauses.push(cur)
+  return { word, clauses, next: i }
+}
+
 function parseLoop(stmts: string[], start: number) {
   const header = stmts[start]
   let i = start + 1
@@ -606,11 +830,12 @@ function parseLoop(stmts: string[], start: number) {
     const s = stmts[i]
     if (s.startsWith('for ') || s.startsWith('while ') || s.startsWith('until ')) depth++
     const doneRedir = s.match(/^done\s*<\s*(\S+)$/)
-    if (s === 'done' || doneRedir) { if (depth === 0) return { header, body, next: i + 1, stdinFile: doneRedir?.[1] }; depth-- }
+    const doneTail = s.match(/^done\s*((?:\||>).*)$/)
+    if (s === 'done' || doneRedir || doneTail) { if (depth === 0) return { header, body, next: i + 1, stdinFile: doneRedir?.[1], tail: doneTail?.[1] }; depth-- }
     body.push(s)
     i++
   }
-  return { header, body, next: i, stdinFile: undefined as string | undefined }
+  return { header, body, next: i, stdinFile: undefined as string | undefined, tail: undefined as string | undefined }
 }
 
 /** Index of a "|" whose right side starts a compound command, or -1. */
@@ -649,14 +874,18 @@ function splitList(stmt: string): { text: string; op: string | null }[] {
   let cur = ''
   let q: string | null = null
   let depth = 0
+  let inTest = false
   for (let i = 0; i < stmt.length; i++) {
     const c = stmt[i]
     if (q) { cur += c; if (c === '\\') cur += stmt[++i] ?? ''; else if (c === q) q = null; continue }
+    if (c === HD) { const end = stmt.indexOf(HD, stmt.indexOf(HD, i + 1) + 1); cur += stmt.slice(i, end + 1); i = end; continue }
     if (c === '\\') { cur += c + (stmt[++i] ?? ''); continue }
     if (c === "'" || c === '"' || c === '`') { q = c; cur += c; continue }
+    if (stmt.startsWith('[[', i) && (i === 0 || isSpace(stmt[i - 1]))) inTest = true
+    if (stmt.startsWith(']]', i)) inTest = false
     if (c === '(') depth++
     if (c === ')') depth--
-    if (depth === 0 && (stmt.startsWith('&&', i) || stmt.startsWith('||', i))) {
+    if (depth === 0 && !inTest && (stmt.startsWith('&&', i) || stmt.startsWith('||', i))) {
       out.push({ text: cur, op: stmt.substr(i, 2) }); cur = ''; i++; continue
     }
     cur += c
@@ -673,6 +902,7 @@ function splitPipes(stmt: string): string[] {
   for (let i = 0; i < stmt.length; i++) {
     const c = stmt[i]
     if (q) { cur += c; if (c === '\\') cur += stmt[++i] ?? ''; else if (c === q) q = null; continue }
+    if (c === HD) { const end = stmt.indexOf(HD, stmt.indexOf(HD, i + 1) + 1); cur += stmt.slice(i, end + 1); i = end; continue }
     if (c === '\\') { cur += c + (stmt[++i] ?? ''); continue }
     if (c === "'" || c === '"' || c === '`') { q = c; cur += c; continue }
     if (c === '(') depth++
@@ -708,14 +938,23 @@ export function tokenize(text: string, sh: Shell): { words: string[]; redirs: Re
   while (i < s.length) {
     while (i < s.length && isSpace(s[i])) i++
     if (i >= s.length) break
+    // here-doc body carried from splitStatements: <<\u0003(q|e)\u0003body\u0003
+    if (s.startsWith('<<' + HD, i)) {
+      const mode = s[i + 3]
+      const end = s.indexOf(HD, i + 5)
+      const raw = s.slice(i + 5, end < 0 ? s.length : end)
+      redirs.push({ kind: '<<', body: mode === 'q' ? raw : expandHeredoc(raw, sh) })
+      i = end < 0 ? s.length : end + 1
+      continue
+    }
     // redirection operators
-    const opMatch = s.slice(i).match(/^(2>>|2>&1|2>|&>|>>|>|<)/)
-    if (opMatch && (i === 0 || isSpace(s[i - 1]) || true)) {
+    const opMatch = s.slice(i).match(/^(2>>|2>&1|1>&2|>&2|2>|&>|>>|>|<<<|<)/)
+    if (opMatch) {
       const op = opMatch[1] as Redir['kind']
       const r: Redir = { kind: op }
       redirs.push(r)
       i += op.length
-      if (op !== '2>&1') pendingRedir = r
+      if (op !== '2>&1' && op !== '>&2' && op !== '1>&2') pendingRedir = r
       continue
     }
     let word = ''
@@ -783,17 +1022,48 @@ function expandDollar(s: string, i: number, sh: Shell, inQuotes = false): { valu
     return { value: sh.capture(s.slice(i + 2, end)), next: end + 1 }
   }
   if (s.startsWith('${', i)) {
-    const end = s.indexOf('}', i)
+    const end = findBrace(s, i + 2)
     const inner = s.slice(i + 2, end < 0 ? s.length : end)
+    // Arrays: ${#a[@]} ${!a[@]} ${a[@]} ${a[*]} ${a[i]} ${a[@]:off:len}
+    const am = inner.match(/^([#!]?)([A-Za-z_]\w*)\[([^\]]+)\](?::(-?\d+)(?::(\d+))?)?$/)
+    if (am) {
+      const list = sh.arrays[am[2]] ?? (sh.env[am[2]] !== undefined ? [sh.env[am[2]]] : [])
+      const idx = am[3].trim()
+      if (am[1] === '#') return { value: String(idx === '@' || idx === '*' ? list.length : (list[evalArith(idx, sh)] ?? '').length), next: end + 1 }
+      if (am[1] === '!') return { value: list.map((_, k) => String(k)).join(' '), next: end + 1 }
+      if (idx === '@' || idx === '*') {
+        let items = list
+        if (am[4] !== undefined) { const off = Number(am[4]); items = am[5] !== undefined ? list.slice(off, off + Number(am[5])) : list.slice(off) }
+        if (idx === '@' && inQuotes) return { value: items.length ? items.join(SPLIT) : DROP, next: end + 1 }
+        return { value: items.join(' '), next: end + 1 }
+      }
+      const k = evalArith(idx, sh)
+      return { value: list[k < 0 ? list.length + k : k] ?? '', next: end + 1 }
+    }
     if (inner.startsWith('#') && inner.length > 1) return { value: String(sh.getVar(inner.slice(1)).length), next: end + 1 }
-    const m = inner.match(/^([A-Za-z_]\w*|[?#@*\d])(?::-(.*)|:=(.*)|:\+(.*)|#(.*)|%(.*))?$/)
+    if (inner.startsWith('!') && inner.length > 1) return { value: sh.getVar(sh.getVar(inner.slice(1))), next: end + 1 }
+    const m = inner.match(/^([A-Za-z_]\w*|[?#@*\d$!])(?::-(.*)|:=(.*)|:\+(.*)|:\?(.*)|##(.*)|#(.*)|%%(.*)|%(.*)|\/\/(.*?)\/(.*)|\/(.*?)\/(.*)|:(-?\d+)(?::(\d+))?|(\^\^|,,|\^|,))?$/s)
     if (!m) return { value: '', next: end + 1 }
-    let v = m[1] === '@' && inQuotes ? atExpansion(sh) : sh.getVar(m[1])
+    const name = m[1]
+    let v: string
+    if (name === '@' && inQuotes) v = atExpansion(sh)
+    else if (m[2] !== undefined || m[3] !== undefined || m[4] !== undefined || m[5] !== undefined) v = sh.isSet(name) || /^[?#@*\d$!]$/.test(name) ? sh.getVar(name) : ''
+    else v = sh.getVar(name)
     if (m[2] !== undefined && v === '') v = m[2]
-    if (m[3] !== undefined && v === '') { v = m[3]; sh.env[m[1]] = v }
+    if (m[3] !== undefined && v === '') { v = m[3]; sh.env[name] = v }
     if (m[4] !== undefined) v = v === '' ? '' : m[4]
-    if (m[5] !== undefined) { const re = globToRegex(m[5], true); v = v.replace(re, '') }
-    if (m[6] !== undefined) { const re = globToRegex(m[6], false, true); v = v.replace(re, '') }
+    if (m[5] !== undefined && v === '') throw new UnboundVariable(`${name}: ${m[5] || 'parameter null or not set'}`)
+    if (m[6] !== undefined) v = v.replace(globToRegex(m[6], true, false, true), '')
+    if (m[7] !== undefined) v = v.replace(globToRegex(m[7], true), '')
+    if (m[8] !== undefined) v = v.replace(globToRegex(m[8], false, true, true), '')
+    if (m[9] !== undefined) v = v.replace(globToRegex(m[9], false, true), '')
+    if (m[10] !== undefined) v = v.replace(new RegExp(globToRegex(m[10], false).source, 'g'), m[11] ?? '')
+    if (m[12] !== undefined) v = v.replace(globToRegex(m[12], false), m[13] ?? '')
+    if (m[14] !== undefined) { const off = Number(m[14]); const start = off < 0 ? Math.max(0, v.length + off) : off; v = m[15] !== undefined ? v.slice(start, start + Number(m[15])) : v.slice(start) }
+    if (m[16] === '^^') v = v.toUpperCase()
+    else if (m[16] === ',,') v = v.toLowerCase()
+    else if (m[16] === '^') v = v.charAt(0).toUpperCase() + v.slice(1)
+    else if (m[16] === ',') v = v.charAt(0).toLowerCase() + v.slice(1)
     return { value: v, next: end + 1 }
   }
   const m = s.slice(i + 1).match(/^([A-Za-z_]\w*|[?#@*\d!$])/)
@@ -806,6 +1076,30 @@ const SPLIT = '\u0001'
 const DROP = '\u0002'
 const atExpansion = (sh: Shell) => (sh.positional.length ? sh.positional.join(SPLIT) : DROP)
 
+/** Index of the '}' closing a ${ that opened at from, allowing nested ${ } inside. */
+function findBrace(s: string, from: number): number {
+  let depth = 1
+  for (let i = from; i < s.length; i++) {
+    if (s[i] === '\\') { i++; continue }
+    if (s.startsWith('${', i)) { depth++; i++; continue }
+    if (s[i] === '}') { depth--; if (depth === 0) return i }
+  }
+  return -1
+}
+
+/** Expand $var, ${...}, $( ) and backslash escapes inside an unquoted here-doc body. */
+function expandHeredoc(body: string, sh: Shell): string {
+  let out = ''
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i]
+    if (c === '\\' && (body[i + 1] === '$' || body[i + 1] === '\\' || body[i + 1] === '`')) { out += body[i + 1]; i++; continue }
+    if (c === '$') { const r = expandDollar(body, i, sh, true); out += r.value; i = r.next - 1; continue }
+    if (c === '`') { const end = body.indexOf('`', i + 1); out += sh.capture(body.slice(i + 1, end < 0 ? body.length : end)); i = end < 0 ? body.length : end; continue }
+    out += c
+  }
+  return out
+}
+
 function findClose(s: string, from: number, open: string, close: string, count: number): number {
   let depth = count
   for (let i = from; i < s.length; i++) {
@@ -815,14 +1109,15 @@ function findClose(s: string, from: number, open: string, close: string, count: 
   return s.length
 }
 
-function globToRegex(glob: string, anchorStart: boolean, anchorEnd = false): RegExp {
-  const re = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
+function globToRegex(glob: string, anchorStart: boolean, anchorEnd = false, greedy = false): RegExp {
+  const re = glob.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, greedy ? '.*' : '.*?').replace(/\?/g, '.')
   return new RegExp((anchorStart ? '^' : '') + re + (anchorEnd ? '$' : ''))
 }
 
 export function globRegex(pattern: string): RegExp {
-  const re = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
-  return new RegExp('^' + re + '$')
+  // Character classes like [Yy] and [0-9] pass through; other regex characters are escaped.
+  const re = pattern.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.').replace(/\[!/g, '[^')
+  try { return new RegExp('^' + re + '$') } catch { return new RegExp('^' + pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$') }
 }
 
 function expandGlob(pattern: string, sh: Shell): string[] {
@@ -838,12 +1133,36 @@ function expandGlob(pattern: string, sh: Shell): string[] {
 
 /** Tiny arithmetic evaluator for $(( )). */
 export function evalArith(expr: string, sh: Shell): number {
+  // Several expressions separated by commas: the last one is the value.
+  const parts = splitTopLevel(expr, ',')
+  if (parts.length > 1) { let v = 0; for (const p of parts) v = evalArith(p, sh); return v }
+  const t = expr.trim()
+  // Assignment forms: x=expr, x+=expr, x++, ++x, x--, --x
+  let m = t.match(/^([A-Za-z_]\w*)\s*(\+\+|--)$/) || t.match(/^(\+\+|--)\s*([A-Za-z_]\w*)$/)
+  if (m) {
+    const post = /^[A-Za-z_]/.test(m[1])
+    const name = post ? m[1] : m[2]
+    const op = post ? m[2] : m[1]
+    const before = Number(sh.env[name] ?? sh.arrays[name]?.[0] ?? 0) || 0
+    const after = op === '++' ? before + 1 : before - 1
+    sh.env[name] = String(after)
+    return post ? before : after
+  }
+  m = t.match(/^([A-Za-z_]\w*)\s*([-+*/%]|\*\*)?=(?!=)\s*(.*)$/s)
+  if (m) {
+    const rhs = evalArith(m[3], sh)
+    const cur = Number(sh.env[m[1]] ?? 0) || 0
+    const ops: Record<string, (a: number, b: number) => number> = { '+': (a, b) => a + b, '-': (a, b) => a - b, '*': (a, b) => a * b, '/': (a, b) => Math.trunc(a / b), '%': (a, b) => a % b, '**': (a, b) => a ** b }
+    const v = m[2] ? ops[m[2]](cur, rhs) : rhs
+    sh.env[m[1]] = String(v)
+    return v
+  }
   const src = expr.replace(/[A-Za-z_]\w*/g, (name) => {
-    const v = sh.getVar(name)
-    return v === '' ? '0' : v
+    const v = sh.env[name] ?? sh.arrays[name]?.[0] ?? (/^[?#]$/.test(name) ? sh.getVar(name) : '')
+    return v === '' || Number.isNaN(Number(v)) ? '0' : v
   })
   let pos = 0
-  const peek = () => src.slice(pos).match(/^\s*(\*\*|<=|>=|==|!=|&&|\|\||[-+*/%()<>!]|\d+)/)?.[1]
+  const peek = () => src.slice(pos).match(/^\s*(\*\*|<=|>=|==|!=|&&|\|\||[-+*/%()<>!?:]|\d+)/)?.[1]
   const take = () => { const t = peek(); if (t) pos += src.slice(pos).indexOf(t) + t.length; return t }
   const primary = (): number => {
     const t = take()
@@ -858,6 +1177,21 @@ export function evalArith(expr: string, sh: Shell): number {
   const add = (): number => { let l = mul(); for (;;) { const t = peek(); if (t === '+' || t === '-') { take(); const r = mul(); l = t === '+' ? l + r : l - r } else return l } }
   const cmp = (): number => { let l = add(); for (;;) { const t = peek(); if (t === '<' || t === '>' || t === '<=' || t === '>=' || t === '==' || t === '!=') { take(); const r = add(); l = Number(t === '<' ? l < r : t === '>' ? l > r : t === '<=' ? l <= r : t === '>=' ? l >= r : t === '==' ? l === r : l !== r) } else return l } }
   const andOr = (): number => { let l = cmp(); for (;;) { const t = peek(); if (t === '&&' || t === '||') { take(); const r = cmp(); l = Number(t === '&&' ? l && r : l || r) } else return l } }
-  const expr_ = andOr
+  const ternary = (): number => { const c = andOr(); if (peek() === '?') { take(); const a = ternary(); if (peek() === ':') take(); const b = ternary(); return c ? a : b } return c }
+  const expr_ = ternary
   return expr_()
+}
+
+function splitTopLevel(s: string, sep: string): string[] {
+  const out: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const c of s) {
+    if (c === '(') depth++
+    if (c === ')') depth--
+    if (c === sep && depth === 0) { out.push(cur); cur = ''; continue }
+    cur += c
+  }
+  out.push(cur)
+  return out
 }

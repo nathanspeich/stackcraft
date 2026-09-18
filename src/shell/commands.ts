@@ -3,9 +3,20 @@ import { FsError, basename as bname, dirname as dname, type FsNode } from './vfs
 import { MAN, summary } from './man'
 import { globRegex, HOME, HOSTNAME, type Shell } from './shell'
 import { installSims } from './sim'
+import { extraCommands } from './bash2'
 
 export interface CmdResult { out: string; err: string; code: number; /** stdout and stderr interleaved in order, for display */ seq?: string }
 export type Command = (sh: Shell, args: string[], stdin: string) => CmdResult
+
+/** Hooks the Tier 2 simulation modules (src/shell/sim) register to refine base behaviour. */
+export const HOOKS: {
+  /** Decide read/write/exec access for the current user, or return undefined to use the base owner/other check. */
+  access?: (sh: Shell, n: FsNode, want: 'r' | 'w' | 'x') => boolean | undefined
+  /** Called right after the shell creates a file or directory (redirection, touch, tee, mkdir), to apply umask and group defaults. */
+  created?: (sh: Shell, abs: string, n: FsNode) => void
+  /** Extra marker after the mode string in ls -l (an ACL shows as "+"). */
+  modeMark?: (n: FsNode) => string
+} = {}
 
 const ok = (out = ''): CmdResult => ({ out, err: '', code: 0 })
 const fail = (err: string, code = 1): CmdResult => ({ out: '', err: err.endsWith('\n') ? err : err + '\n', code })
@@ -52,8 +63,8 @@ const joinLines = (ls: string[]) => (ls.length ? ls.join('\n') + '\n' : '')
 
 function modeString(n: FsNode) {
   const m = n.mode
-  const bits = (v: number) => `${v & 4 ? 'r' : '-'}${v & 2 ? 'w' : '-'}${v & 1 ? 'x' : '-'}`
-  return (n.type === 'dir' ? 'd' : '-') + bits(m >> 6) + bits((m >> 3) & 7) + bits(m & 7)
+  const bits = (v: number, special: boolean, ch: string) => `${v & 4 ? 'r' : '-'}${v & 2 ? 'w' : '-'}${v & 1 ? (special ? ch : 'x') : special ? ch.toUpperCase() : '-'}`
+  return (n.type === 'dir' ? 'd' : '-') + bits((m >> 6) & 7, Boolean(m & 0o4000), 's') + bits((m >> 3) & 7, Boolean(m & 0o2000), 's') + bits(m & 7, Boolean(m & 0o1000), 't')
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -113,7 +124,7 @@ export const COMMANDS: Record<string, Command> = {
     const n = sh.vfs.get(abs)
     if (!n) return fail(`bash: cd: ${args[0]}: No such file or directory`)
     if (n.type !== 'dir') return fail(`bash: cd: ${args[0]}: Not a directory`)
-    if (!(sh.user === 'root' || n.mode & 0o001 || (n.owner === sh.user && n.mode & 0o100))) return fail(`bash: cd: ${args[0]}: Permission denied`)
+    if (!sh.canExec(n)) return fail(`bash: cd: ${args[0]}: Permission denied`)
     sh.prevDir = sh.cwd
     sh.cwd = abs
     sh.env.PWD = abs
@@ -132,7 +143,7 @@ export const COMMANDS: Record<string, Command> = {
       if (!long) return name
       const size = h ? human(sizeOf(n)) : String(n.type === 'dir' ? 4096 : n.content.length)
       const links = n.type === 'dir' ? n.children.size + 2 : 1
-      return `${modeString(n)} ${links} ${n.owner.padEnd(7)} ${n.group.padEnd(7)} ${size.padStart(6)} ${fmtDate(n.mtime)} ${name}`
+      return `${modeString(n)}${HOOKS.modeMark?.(n) ?? ''} ${links} ${n.owner.padEnd(7)} ${n.group.padEnd(7)} ${size.padStart(6)} ${fmtDate(n.mtime)} ${name}`
     }
     const listDir = (abs: string) => {
       const entries = sh.vfs.list(abs).filter(([name]) => all || !name.startsWith('.'))
@@ -152,7 +163,7 @@ export const COMMANDS: Record<string, Command> = {
       const n = sh.vfs.get(abs)
       if (!n) { err += `ls: cannot access '${t}': No such file or directory\n`; continue }
       if (n.type === 'dir') {
-        if (!(sh.user === 'root' || n.mode & 0o004 || (n.owner === sh.user && n.mode & 0o400))) { err += `ls: cannot open directory '${t}': Permission denied\n`; continue }
+        if (!sh.canRead(n)) { err += `ls: cannot open directory '${t}': Permission denied\n`; continue }
         dirs.push(t)
       } else files.push(fmt(t, n))
     }
@@ -174,7 +185,9 @@ export const COMMANDS: Record<string, Command> = {
       try {
         const parent = sh.vfs.get(dname(abs))
         if (parent && !sh.canWrite(parent)) throw new FsError(`cannot create directory '${d}': Permission denied`)
+        const existed = Boolean(sh.vfs.get(abs))
         sh.vfs.mkdir(abs, { parents: flags.has('p'), owner: sh.user })
+        if (!existed) HOOKS.created?.(sh, abs, sh.vfs.get(abs)!)
       } catch (e) { err += `mkdir: ${(e as Error).message.replace(abs, d)}\n` }
     }
     return { out: '', err, code: err ? 1 : 0 }
@@ -1091,5 +1104,6 @@ function evalTest(sh: Shell, args: string[]): boolean {
 
 export const commandSummary = summary
 
-// Tier 2 simulation modules may add commands or wrap the ones above.
+// Tier 2 builtins (getopts, trap, set, mktemp, shellcheck, tar, ...) then the simulation modules, which may wrap commands.
+Object.assign(COMMANDS, extraCommands(COMMANDS))
 installSims(COMMANDS)
