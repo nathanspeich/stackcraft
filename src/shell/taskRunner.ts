@@ -10,6 +10,7 @@ export function shellForTask(task: InAppTask): Shell {
     if (task.machine.packages) sh.state.packages.push(...task.machine.packages)
     if (task.machine.services) Object.assign(sh.state.services, task.machine.services)
     if (task.machine.crontab) sh.state.crontab = task.machine.crontab
+    if (task.machine.sims) Object.assign(sh.state.sims, task.machine.sims)
   }
   if (task.file && task.starter !== undefined) sh.writeFile(task.file, task.starter)
   if (task.cwd) sh.cwd = sh.path(task.cwd)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { LESSON_BY_ID, nextLesson } from '../content/lessons'
 import { TIER_LABEL, weekPlan } from '../content/curriculum'
@@ -7,11 +7,11 @@ import { XP } from '../game/xp'
 import { BADGE_BY_ID } from '../game/badges'
 import { playSound } from '../lib/sound'
 import { isUnlocked, useStore } from '../store/useStore'
-import { useCallback } from 'react'
 import Celebration from '../components/Celebration'
 import ShellTask from '../components/ShellTask'
 import PythonTask from '../components/PythonTask'
 import SqlTask from '../components/SqlTask'
+import RealTaskPanel from '../components/RealTask'
 import CodeBlock from '../components/CodeBlock'
 import { Button, Card, LinkButton, TrackPill } from '../components/ui'
 import { cx } from '../lib/cx'
@@ -78,12 +78,9 @@ function RunnerWithRealSteps({ task, taskKey, onPassChange }: { task: InAppTask;
   )
 }
 
-/** Task panel. Shell tasks run in the simulated terminal, Python in Pyodide, SQL in sql.js; paste checks arrive in phase 6. */
-function TaskPanel({ task, taskKey, onPassChange }: { task: Task; taskKey: string; onPassChange: (passed: boolean) => void }) {
-  useEffect(() => {
-    if (task.kind === 'real') onPassChange(true)
-  }, [task, onPassChange])
-  if (task.kind === 'shell' || task.kind === 'python' || task.kind === 'sql') return <RunnerWithRealSteps key={taskKey} task={task} taskKey={taskKey} onPassChange={onPassChange} />
+/** Task panel. Shell tasks run in the simulated terminal, Python in Pyodide, SQL in sql.js, and real-machine tasks are verified from pasted output. */
+function TaskPanel({ lessonId, task, taskKey, onPassChange }: { lessonId: string; task: Task; taskKey: string; onPassChange: (passed: boolean) => void }) {
+  if (task.kind === 'real') return <RealTaskPanel key={taskKey} lessonId={lessonId} task={task} onPassChange={onPassChange} />
   if (task.kind === 'selfcheck') {
     return (
       <div className="space-y-3">
@@ -92,13 +89,7 @@ function TaskPanel({ task, taskKey, onPassChange }: { task: Task; taskKey: strin
       </div>
     )
   }
-  const label = task.kind === 'real' ? 'real-machine paste checks' : `the ${task.kind} runner`
-  return (
-    <div className="space-y-3">
-      <p className="text-[15px]">{'instructions' in task ? task.instructions : task.intro}</p>
-      <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted">This task needs {label}, which arrives in a later build phase. Continue to the quiz for now.</div>
-    </div>
-  )
+  return <RunnerWithRealSteps key={taskKey} task={task} taskKey={taskKey} onPassChange={onPassChange} />
 }
 
 function Quiz({ questions, onFinish }: { questions: QuizQuestion[]; onFinish: (correct: number) => void }) {
@@ -212,6 +203,7 @@ function LessonView({ id }: { id: string }) {
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <TrackPill track={lesson.track} />
           <span className="text-xs text-muted">Week {lesson.week} · Day {lesson.day} · {TIER_LABEL[lesson.tier]}</span>
+          {lesson.task.kind === 'real' && <span className="rounded-full bg-capstone/15 px-2 py-0.5 text-[11px] font-semibold text-capstone">Real machine</span>}
         </div>
         <h1 className="mt-2 font-display text-3xl font-extrabold leading-tight tracking-tight">{lesson.title}</h1>
         {plan && <p className="text-sm text-muted">Week {lesson.week} theme: {plan.title}</p>}
@@ -237,8 +229,8 @@ function LessonView({ id }: { id: string }) {
 
       {step === 'task' && (
         <Card>
-          <h2 className="mb-3 font-display text-lg font-bold">Your turn</h2>
-          <TaskPanel task={lesson.task} taskKey={lesson.id} onPassChange={onPassChange} />
+          <h2 className="mb-3 font-display text-lg font-bold">{lesson.task.kind === 'real' ? 'On your machine' : 'Your turn'}</h2>
+          <TaskPanel lessonId={lesson.id} task={lesson.task} taskKey={lesson.id} onPassChange={onPassChange} />
         </Card>
       )}
 

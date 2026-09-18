@@ -48,6 +48,8 @@ export interface ShellState {
   services: Record<string, 'active' | 'inactive' | 'failed'>
   lastStatus: number
   fileModes: Record<string, number>
+  /** State owned by the Tier 2 simulation modules under src/shell/sim, keyed by module name (users, systemd, net, docker, pyenv). */
+  sims: Record<string, unknown>
 }
 
 export interface CheckResult {
@@ -94,17 +96,32 @@ export interface SelfCheckTask {
   steps: string[]
 }
 
+/**
+ * Simple pattern tests on pasted text. A step passes when every checker in its list passes.
+ * regex: the pattern matches at least `count` times (default 1). includes: `text` and every entry of `all` appear.
+ * lines: at least N non-empty lines. words: at least N words. not: the pattern must not match anywhere.
+ * any: at least one of the nested checkers passes.
+ */
 export type PasteChecker =
-  | { type: 'regex'; pattern: string; flags?: string }
+  | { type: 'regex'; pattern: string; flags?: string; count?: number; /** Shown instead of the pattern when the check fails. */ label?: string }
   | { type: 'includes'; text: string; all?: string[] }
   | { type: 'lines'; atLeast: number }
+  | { type: 'words'; atLeast: number }
+  | { type: 'not'; pattern: string; flags?: string; label?: string }
+  | { type: 'any'; of: PasteChecker[]; label?: string }
 
 export interface RealStep {
+  /** What to do, in plain words. Paragraphs separated by blank lines. */
   instruction: string
+  /** Optional command(s) to copy and run, shown in a copyable code block. */
   command?: string
+  /** Label above the paste box, like "Paste the output of shellcheck backup.sh". */
   pasteLabel: string
   check: PasteChecker[]
+  /** Shown after a failed check. */
   hint: string
+  /** Realistic output that passes the check. Used by the tests, never shown to the learner. */
+  example: string
 }
 
 /** Tier 2 and 3 real-machine project task, verified by pasted output. */

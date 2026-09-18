@@ -12,6 +12,7 @@ import { Button, Card, PageTitle, ProgressBar, TrackPill } from '../components/u
 import { cx } from '../lib/cx'
 import { playSound } from '../lib/sound'
 import { ALL_CARDS } from '../content/cards'
+import { LESSON_BY_ID } from '../content/lessons'
 
 const TRACKS: Track[] = ['linux', 'python', 'sql']
 const TRACK_BAR: Record<Track, string> = { linux: 'bg-linux', python: 'bg-python', sql: 'bg-sql', capstone: 'bg-capstone' }
@@ -119,12 +120,20 @@ export default function Profile() {
           <p className="text-sm text-muted">Nothing yet. From Tier 2, output you paste for real-machine projects is kept here, by lesson.</p>
         ) : (
           <ul className="space-y-2">
-            {state.evidence.map((e, i) => (
-              <li key={i} className="rounded-xl bg-surface-2 p-2">
-                <p className="text-xs text-muted">{e.lessonId} · step {e.step}{e.skipped ? ' · marked done without paste' : ''}</p>
-                <pre className="mt-1 max-h-32 overflow-auto text-xs">{e.pasted}</pre>
-              </li>
-            ))}
+            {[...state.evidence].sort((a, b) => (a.at < b.at ? 1 : -1)).map((e, i) => {
+              const lesson = LESSON_BY_ID.get(e.lessonId)
+              const label = lesson && lesson.task.kind === 'real' ? lesson.task.steps[e.step]?.pasteLabel : undefined
+              return (
+                <li key={i} className="rounded-xl bg-surface-2 p-2">
+                  <p className="text-xs text-muted">
+                    <span className="font-semibold text-text">{lesson ? `Week ${lesson.week} day ${lesson.day}: ${lesson.title}` : e.lessonId}</span> · step {e.step + 1}
+                    {e.skipped ? ' · marked done without a paste' : ' · verified'} · {e.at.slice(0, 10)}
+                  </p>
+                  {label && <p className="mt-0.5 text-[11px] text-muted">{label}</p>}
+                  <pre className="mt-1 max-h-32 overflow-auto text-xs">{e.pasted}</pre>
+                </li>
+              )
+            })}
           </ul>
         )}
       </Card>
@@ -139,8 +148,9 @@ export default function Profile() {
         <h2 className="font-display text-lg font-bold">Help</h2>
         <p className="mt-1 text-sm text-muted">The app never talks to your machine. For Tier 2 and 3 projects it only reads what you paste.</p>
         <p className="mt-3 text-sm font-semibold">Reset the VM</p>
-        <p className="text-sm text-muted">If the stackcraft VM gets into a bad state, delete it and redo week 13 day 1:</p>
+        <p className="text-sm text-muted">If the stackcraft VM gets into a bad state, delete it on your Mac and redo week 13 day 1 to create it again:</p>
         <pre className="mt-2 overflow-x-auto rounded-xl bg-bg p-3 text-xs">multipass delete stackcraft{'\n'}multipass purge</pre>
+        <p className="mt-2 text-xs text-muted">multipass list shows the VM's IP address. multipass shell stackcraft opens a shell inside it.</p>
       </Card>
 
       <Card>

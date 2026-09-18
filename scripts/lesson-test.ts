@@ -7,6 +7,7 @@ import { shellForTask as build } from '../src/shell/taskRunner'
 import { runPython, toRunResult, type PyodideLike } from '../src/python/run'
 import { SqlSession } from '../src/sql/run'
 import type { SqlJsStatic } from 'sql.js'
+import { checkPaste } from '../src/content/paste'
 
 let sqljs: SqlJsStatic | null = null
 async function sql(): Promise<SqlJsStatic> {
@@ -43,6 +44,24 @@ for (const dir of dirs) {
     if (/—/.test(JSON.stringify(lesson))) problems.push('contains an em dash')
     if (lesson.quiz.length !== 3) problems.push(`quiz has ${lesson.quiz.length} questions`)
     for (const q of lesson.quiz) if (q.options.length !== 3) problems.push('quiz question without 3 options')
+    if (lesson.tier > 1 && lesson.day === 5 && lesson.task.kind !== 'real') problems.push('day 5 of a Tier 2 or 3 week must be a real-machine task')
+    if (lesson.tier > 1 && lesson.task.kind === 'selfcheck') problems.push('Tier 2 and 3 lessons use paste-verified tasks, not self-check boxes')
+    if (lesson.task.kind === 'real') {
+      const task = lesson.task
+      if (!task.intro.trim()) problems.push('real task has no intro')
+      if (task.steps.length < 1) problems.push('real task has no steps')
+      task.steps.forEach((step, i) => {
+        const n = `step ${i + 1}`
+        if (!step.instruction.trim() || !step.pasteLabel.trim() || !step.hint.trim()) problems.push(`${n} is missing an instruction, paste label, or hint`)
+        if (!step.check.length) problems.push(`${n} has no checkers`)
+        if (!step.example?.trim()) problems.push(`${n} has no example paste`)
+        else {
+          const good = checkPaste(step.example, step.check)
+          if (!good.pass) problems.push(`${n} example does not pass: ${good.message}`)
+        }
+        if (checkPaste('', step.check).pass || checkPaste('hello world\n', step.check).pass) problems.push(`${n} passes on junk input`)
+      })
+    }
     if (lesson.task.kind === 'shell') {
       const task = lesson.task
       const fresh = build(task)

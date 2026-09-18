@@ -35,6 +35,7 @@ export const defaultState = (): ShellState => ({
   services: { ssh: 'active', cron: 'active', nginx: 'inactive' },
   lastStatus: 0,
   fileModes: {},
+  sims: {},
 })
 
 export class Shell {

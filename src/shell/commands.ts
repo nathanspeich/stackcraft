@@ -2,6 +2,7 @@
 import { FsError, basename as bname, dirname as dname, type FsNode } from './vfs'
 import { MAN, summary } from './man'
 import { globRegex, HOME, HOSTNAME, type Shell } from './shell'
+import { installSims } from './sim'
 
 export interface CmdResult { out: string; err: string; code: number; /** stdout and stderr interleaved in order, for display */ seq?: string }
 export type Command = (sh: Shell, args: string[], stdin: string) => CmdResult
@@ -1089,3 +1090,6 @@ function evalTest(sh: Shell, args: string[]): boolean {
 }
 
 export const commandSummary = summary
+
+// Tier 2 simulation modules may add commands or wrap the ones above.
+installSims(COMMANDS)

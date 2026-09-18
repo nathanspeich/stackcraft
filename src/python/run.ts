@@ -1,5 +1,6 @@
 // Shared Python runner logic. Used by the browser worker and the Node test harness.
 import type { RunResult } from '../content/types'
+import { EXTRA_SHIMS } from './shims'
 
 export const PYODIDE_VERSION = '314.0.7'
 export const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full`
@@ -220,9 +221,17 @@ def check_call(args, **kw):
 `
 
 const SETUP = `
-import sys, io, os, builtins, traceback, types
+import sys, io, os, builtins, traceback, types, re, asyncio
+from pyodide.code import eval_code_async
 
-def _stackcraft_run(code, stdin_text, argv):
+_SHIM_MODULES = ("subprocess", "requests", ${Object.keys(EXTRA_SHIMS).map((f) => JSON.stringify(f.replace(/\.py$/, ''))).join(', ')})
+
+def _stackcraft_prepare(code):
+    # asyncio.run() cannot block inside the browser, but the program can be run with
+    # top-level await instead: "asyncio.run(main())" becomes "await main()".
+    return re.sub(r"^(\\s*)((?:[A-Za-z_]\\w*\\s*=\\s*)?)asyncio\\.run\\((.+)\\)\\s*(#.*)?$", r"\\1\\2await \\3", code, flags=re.M)
+
+async def _stackcraft_run(code, stdin_text, argv):
     old_out, old_err, old_in, old_input, old_argv = sys.stdout, sys.stderr, sys.stdin, builtins.input, sys.argv
     out, err = io.StringIO(), io.StringIO()
     lines = stdin_text.split("\\n") if stdin_text else []
@@ -234,19 +243,25 @@ def _stackcraft_run(code, stdin_text, argv):
         out.write(value + "\\n")
         return value
     sys.stdout, sys.stderr, sys.stdin, builtins.input, sys.argv = out, err, io.StringIO(stdin_text), fake_input, ["main.py"] + list(argv)
-    for m in ("subprocess", "requests"):
-        sys.modules.pop(m, None)
+    for m in list(sys.modules):
+        if m in _SHIM_MODULES or m.startswith("_stackcraft_user_"):
+            sys.modules.pop(m, None)
+    # Modules the learner wrote into the working directory must be re-imported fresh each run.
+    for m in list(sys.modules):
+        f = getattr(sys.modules[m], "__file__", None) or ""
+        if f.startswith("${WORK_DIR}"):
+            sys.modules.pop(m, None)
     os.chdir("${WORK_DIR}")
     error = None
     try:
-        exec(compile(code, "main.py", "exec"), {"__name__": "__main__", "__file__": "main.py"})
+        await eval_code_async(_stackcraft_prepare(code), {"__name__": "__main__", "__file__": "main.py"}, filename="main.py", return_mode="none")
     except SystemExit as e:
         if e.code not in (None, 0):
             err.write(f"(exited with status {e.code})\\n")
     except BaseException as e:
         tb = traceback.format_exception(type(e), e, e.__traceback__)
-        # Drop the runner's own frame so the trace starts at the learner's code.
-        tb = [l for l in tb if "_stackcraft_run" not in l and "<string>" not in l]
+        # Drop the runner's own frames so the trace starts at the learner's code.
+        tb = [l for l in tb if "_stackcraft_run" not in l and "<string>" not in l and "pyodide/code.py" not in l and "_pyodide/_base.py" not in l and "eval_code_async" not in l]
         err.write("".join(tb))
         error = tb[-1].strip() if tb else str(e)
     finally:
@@ -262,6 +277,7 @@ export async function preparePyodide(py: PyodideLike) {
   mkdirp(py, WORK_DIR)
   py.FS.writeFile(`${SHIM_DIR}/requests.py`, REQUESTS_SHIM)
   py.FS.writeFile(`${SHIM_DIR}/subprocess.py`, SUBPROCESS_SHIM)
+  for (const [name, src] of Object.entries(EXTRA_SHIMS)) py.FS.writeFile(`${SHIM_DIR}/${name}`, src)
   py.runPython(`import sys\nif "${SHIM_DIR}" not in sys.path: sys.path.insert(0, "${SHIM_DIR}")\nif "${WORK_DIR}" not in sys.path: sys.path.insert(0, "${WORK_DIR}")`)
   py.runPython(SETUP)
   prepared.add(py)
@@ -308,8 +324,8 @@ export async function runPython(py: PyodideLike, req: PyRunRequest): Promise<PyR
     mkdirp(py, dir)
     py.FS.writeFile(full, content)
   }
-  const fn = py.globals.get('_stackcraft_run') as (code: string, stdin: string, argv: unknown) => { toJs(): [string, string, string | null]; destroy?(): void }
-  const res = fn(req.code, req.stdin ?? '', py.toPy(req.argv ?? []))
+  const fn = py.globals.get('_stackcraft_run') as (code: string, stdin: string, argv: unknown) => Promise<{ toJs(): [string, string, string | null]; destroy?(): void }>
+  const res = await fn(req.code, req.stdin ?? '', py.toPy(req.argv ?? []))
   const [stdout, stderr, error] = res.toJs()
   res.destroy?.()
   return { stdout, stderr, error: error ?? undefined, files: snapshot(py, WORK_DIR) }

@@ -29,10 +29,11 @@ export interface CardSchedule {
 
 export interface EvidenceEntry {
   lessonId: string
+  /** Zero-based step index within the lesson's real-machine task. */
   step: number
   pasted: string
   at: string
-  /** True when the step was marked done via the "cannot paste" link. */
+  /** True when the step was marked done via the "cannot paste" link. Skipped steps do not count toward badges. */
   skipped?: boolean
 }
 
@@ -57,6 +58,8 @@ export interface StackcraftState {
   settings: Settings
   /** Lesson id whose completion celebration is pending. */
   lastCompleted: string | null
+  /** The learner has read the one-time note that the app only reads what they paste. */
+  realNoticeDismissed: boolean
 
   completeLesson: (id: string, quizCorrect: number, quizTotal: number) => { gained: number; weekDone: boolean; tierDone: boolean; newBadges: string[]; freezeEarned: boolean }
   unlockLesson: (id: string) => void
@@ -65,6 +68,9 @@ export interface StackcraftState {
   /** Apply a flashcard grade with SM-2. countReview adds XP and streak credit (false for repeat ratings in one session). */
   rateCard: (cardId: string, grade: Grade, countReview?: boolean) => CardSchedule
   awardBadge: (id: string) => void
+  /** Save what was pasted for a real-machine step (replacing an earlier entry for the same step). */
+  recordEvidence: (lessonId: string, step: number, pasted: string, skipped?: boolean) => void
+  dismissRealNotice: () => void
   setTheme: (theme: Settings['theme']) => void
   setSound: (on: boolean) => void
   clearLastCompleted: () => void
@@ -84,6 +90,7 @@ const initial = () => ({
   evidence: [],
   settings: { theme: 'dark' as const, sound: false },
   lastCompleted: null,
+  realNoticeDismissed: false,
 })
 
 export const useStore = create<StackcraftState>()(
@@ -125,7 +132,8 @@ export const useStore = create<StackcraftState>()(
         const newBadges: string[] = []
         const earn = (b: string) => { if (!badges[b]) { badges[b] = now; newBadges.push(b) } }
         earn('first-lesson')
-        if (lesson.badge) earn(lesson.badge)
+        // Lesson badges for real-machine projects need every step verified by a paste, not skipped.
+        if (lesson.badge && (lesson.task.kind !== 'real' || evidenceVerified(s.evidence, lesson.id, lesson.task.steps.length))) earn(lesson.badge)
         for (const b of streakBadges(streak.current)) earn(b)
         for (const track of ['linux', 'python', 'sql'] as Track[]) {
           if (lessonsForTrack(track).filter((l) => l.tier === 1).every((l) => completed[l.id])) earn(`track-${track}-1`)
@@ -175,16 +183,33 @@ export const useStore = create<StackcraftState>()(
       },
 
       awardBadge: (id) => set((s) => (s.badges[id] ? s : { badges: { ...s.badges, [id]: new Date().toISOString() } })),
+      recordEvidence: (lessonId, step, pasted, skipped = false) =>
+        set((s) => ({
+          evidence: [...s.evidence.filter((e) => !(e.lessonId === lessonId && e.step === step)), { lessonId, step, pasted, at: new Date().toISOString(), skipped }],
+        })),
+      dismissRealNotice: () => set({ realNoticeDismissed: true }),
       setTheme: (theme) => set((s) => ({ settings: { ...s.settings, theme } })),
       setSound: (sound) => set((s) => ({ settings: { ...s.settings, sound } })),
       clearLastCompleted: () => set({ lastCompleted: null }),
-      resetAll: () => set({ ...initial(), settings: get().settings }),
+      resetAll: () => set({ ...initial(), settings: get().settings, realNoticeDismissed: get().realNoticeDismissed }),
     }),
     { name: 'stackcraft', version: 1 },
   ),
 )
 
 /* Derived helpers (pure functions of state) */
+
+/** Evidence entries for one lesson, keyed by step index. */
+export function evidenceFor(evidence: EvidenceEntry[], lessonId: string): Map<number, EvidenceEntry> {
+  return new Map(evidence.filter((e) => e.lessonId === lessonId).map((e) => [e.step, e]))
+}
+
+/** True when every step of a real-machine task was verified by a paste (none skipped). */
+export function evidenceVerified(evidence: EvidenceEntry[], lessonId: string, stepCount: number): boolean {
+  const by = evidenceFor(evidence, lessonId)
+  for (let i = 0; i < stepCount; i++) { const e = by.get(i); if (!e || e.skipped) return false }
+  return true
+}
 
 export const isCompleted = (s: StackcraftState, id: string) => Boolean(s.completed[id])
 
