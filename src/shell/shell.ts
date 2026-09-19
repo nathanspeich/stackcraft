@@ -2,7 +2,7 @@
 // small bash interpreter (variables, if, for, while, case, functions, arrays,
 // getopts, here-docs, traps, set -e, exit codes).
 import { VFS, FsError, normalize, dirname, seedFs, type FsNode } from './vfs'
-import { COMMANDS, HOOKS, type CmdResult } from './commands'
+import { COMMANDS, HOOKS, ensureSims, type CmdResult } from './commands'
 import { MAN } from './man'
 import type { ShellState } from '../content/types'
 
@@ -82,7 +82,7 @@ export class Shell {
   jobs: { id: number; pid: number; cmd: string }[] = []
   nextPid = 2000
   /** Files created by editor pane, kept in sync. */
-  constructor() { this.seedSystem() }
+  constructor() { ensureSims(); this.seedSystem() }
 
   /* ---------- setup ---------- */
 

@@ -1105,5 +1105,12 @@ function evalTest(sh: Shell, args: string[]): boolean {
 export const commandSummary = summary
 
 // Tier 2 builtins (getopts, trap, set, mktemp, shellcheck, tar, ...) then the simulation modules, which may wrap commands.
+// The simulations are installed lazily by the first Shell so that a lesson importing a sim module
+// directly (for its seed helpers) never triggers a half-initialised circular import.
 Object.assign(COMMANDS, extraCommands(COMMANDS))
-installSims(COMMANDS)
+let simsInstalled = false
+export function ensureSims() {
+  if (simsInstalled) return
+  simsInstalled = true
+  installSims(COMMANDS)
+}
