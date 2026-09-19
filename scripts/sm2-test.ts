@@ -102,8 +102,12 @@ test('cards reference real lessons and have unique ids', () => {
     assert.ok(!/—/.test(c.front + c.back), `${c.id} contains an em dash`)
     assert.ok(c.back.split(/\s+/).length <= 30, `${c.id} back is too long`)
   }
-  assert.ok(ALL_CARDS.length >= 75, `expected at least 75 cards, got ${ALL_CARDS.length}`)
-  for (const t of ['linux', 'python', 'sql'] as const) assert.equal(ALL_CARDS.filter((c) => c.track === t).length, 25)
+  assert.ok(ALL_CARDS.length >= 135, `expected at least 135 cards, got ${ALL_CARDS.length}`)
+  for (const t of ['linux', 'python', 'sql'] as const) {
+    assert.equal(ALL_CARDS.filter((c) => c.track === t && c.tier === 1).length, 25, `${t} tier 1 deck`)
+    assert.equal(ALL_CARDS.filter((c) => c.track === t && c.tier === 2).length, 20, `${t} tier 2 deck`)
+  }
+  for (const c of ALL_CARDS) assert.equal(LESSON_BY_ID.get(c.lesson)!.tier, c.tier, `${c.id} tier does not match its lesson`)
 })
 
 test('cards unlock as lessons complete and due counts follow the schedule', () => {
