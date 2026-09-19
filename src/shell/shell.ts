@@ -66,6 +66,8 @@ export class Shell {
   inCondition = 0
   /** getopts: position inside a clustered flag group like -abc. */
   optSub = 0
+  /** Set by execList when a failure happened inside a && or || list before its last element (set -e ignores those). */
+  private listShortCircuit = false
   lastBgPid = 0
   positional: string[] = []
   scriptName = 'bash'
@@ -186,9 +188,13 @@ export class Shell {
     this.tty = false
     try {
       const r = this.execScript(text)
+      // stderr of a substitution still reaches the terminal, attached to the command that used it.
+      if (r.err) this.capturedErr += r.err
       return r.out.replace(/\n+$/, '')
     } finally { this.tty = saved }
   }
+  /** stderr produced inside $( ) while the current command was being expanded. */
+  capturedErr = ''
 
   snapshotForChecker() {
     return {
@@ -333,7 +339,7 @@ export class Shell {
         }
         combine(this.execList(s))
         i++
-        if (code !== 0 && this.inCondition === 0) {
+        if (code !== 0 && this.inCondition === 0 && !this.listShortCircuit) {
           if (this.traps.ERR) { const t = this.execScript(this.traps.ERR); add(t) }
           if (this.opts.errexit) throw new ShellExit(code)
         }
@@ -367,8 +373,9 @@ export class Shell {
     let seq = ''
     let code = 0
     let prevOp: string | null = null
+    this.listShortCircuit = false
     for (const { text, op } of parts) {
-      if (prevOp === '&&' && code !== 0) { prevOp = op; continue }
+      if (prevOp === '&&' && code !== 0) { prevOp = op; this.listShortCircuit = true; continue }
       if (prevOp === '||' && code === 0) { prevOp = op; continue }
       const r = this.execPipeline(text)
       out += r.out; err += r.err; seq += r.seq ?? r.err + r.out; code = r.code
@@ -459,22 +466,22 @@ export class Shell {
       if (r.kind === '<<' && r.body !== undefined) stdin = r.body
       if (r.kind === '<<<' && r.target !== undefined) stdin = r.target + '\n'
     }
-    const trace = this.opts.xtrace && words.length ? `+ ${words.join(' ')}\n` : ''
+    const trace = (this.capturedErr + (this.opts.xtrace && words.length ? `+ ${words.join(' ')}\n` : ''))
+    this.capturedErr = ''
     // assignments
     while (words.length && /^[A-Za-z_]\w*=/.test(words[0])) {
       const [name, ...rest] = words[0].split('=')
       this.env[name] = rest.join('=')
       words.shift()
-      if (words.length === 0) return { out: '', err: '', code: 0 }
+      if (words.length === 0) return { out: '', err: trace, code: 0, seq: trace }
     }
     let res: CmdResult
     if (words.length === 0) res = { out: '', err: '', code: 0 }
     else res = this.invoke(words, stdin)
-    if (trace) res = { ...res, err: trace + res.err, seq: trace + (res.seq ?? res.err + res.out) }
     // output redirection
     for (const r of redirs) {
       if (r.kind === '<' || r.kind === '<<' || r.kind === '<<<') continue
-      if (r.kind === '2>&1') { res = { ...res, out: res.out + res.err, err: '' }; continue }
+      if (r.kind === '2>&1') { res = { out: res.seq ?? res.err + res.out, err: '', code: res.code }; continue }
       if (r.kind === '>&2' || r.kind === '1>&2') { res = { ...res, err: res.err + res.out, out: '' }; continue }
       if (r.target === undefined) continue
       if (r.target === '/dev/null') { res = r.kind === '2>' || r.kind === '2>>' ? { ...res, err: '' } : r.kind === '&>' ? { ...res, out: '', err: '' } : { ...res, out: '' }; continue }
@@ -486,6 +493,7 @@ export class Shell {
         return { out: '', err: `bash: ${(e as Error).message}\n`, code: 1 }
       }
     }
+    if (trace) res = { ...res, err: trace + res.err, seq: trace + (res.seq ?? res.err + res.out) }
     return res
   }
 
@@ -540,10 +548,10 @@ export class Shell {
       const cmd = abs.split('/').pop()!
       return COMMANDS[cmd] ? COMMANDS[cmd](this, args, stdin) : { out: '', err: `${cmd}: command not found\n`, code: 127 }
     }
-    return this.runScriptFile(abs, n.content, args, stdin)
+    return this.runScriptFile(abs, n.content, args, stdin, path)
   }
 
-  runScriptFile(abs: string, content: string, args: string[], stdin: string): CmdResult {
+  runScriptFile(abs: string, content: string, args: string[], stdin: string, name = abs): CmdResult {
     const first = content.split('\n')[0]
     if (first.startsWith('#!') && !/(bash|\/sh|\/env sh|\/env bash)/.test(first)) {
       return { out: '', err: `bash: ${abs}: only bash and sh scripts run in this terminal (shebang: ${first})\n`, code: 126 }
@@ -562,7 +570,7 @@ export class Shell {
     this.env.STDIN = stdin
     let res: CmdResult | undefined
     try {
-      res = this.execScript(content, args, abs)
+      res = this.execScript(content, args, name)
       return res
     } finally {
       if (this.traps.EXIT) {
@@ -921,13 +929,17 @@ export function tokenize(text: string, sh: Shell): { words: string[]; redirs: Re
   let i = 0
   const s = text
   let pendingRedir: Redir | null = null
+  /** Leading NAME=value words are assignments: their values are never split or globbed. */
+  let onlyAssignments = true
 
   const pushWord = (w0: string, glob: boolean, split: boolean) => {
     if (w0 === DROP) return
     const w = w0.split(DROP).join('')
-    const parts = (split ? w.split(/\s+/).filter(Boolean) : [w]).flatMap((p) => p.split(SPLIT))
+    const isAssign = onlyAssignments && !pendingRedir && /^[A-Za-z_]\w*\+?=/.test(w)
+    if (!isAssign && !pendingRedir) onlyAssignments = false
+    const parts = (split && !isAssign ? w.split(/\s+/).filter(Boolean) : [w]).flatMap((p) => p.split(SPLIT))
     for (const part of parts) {
-      const expanded = glob && /[*?]/.test(part) ? expandGlob(part, sh) : [part]
+      const expanded = glob && !isAssign && words[0] !== '[[' && /[*?]/.test(part) ? expandGlob(part, sh) : [part]
       for (const e of expanded) {
         if (pendingRedir) { pendingRedir.target = e; pendingRedir = null }
         else words.push(e)

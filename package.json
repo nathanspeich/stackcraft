@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "tsx scripts/shell-smoke.ts && tsx scripts/bash2-smoke.ts && tsx scripts/sm2-test.ts && tsx scripts/lesson-test.ts"
+    "test": "tsx scripts/shell-smoke.ts && tsx scripts/bash2-smoke.ts && tsx scripts/sm2-test.ts && tsx scripts/lesson-test.ts && tsx scripts/users-smoke.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

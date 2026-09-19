@@ -223,6 +223,30 @@ export function extraCommands(base: Record<string, Command>): Record<string, Com
     },
 
     shopt: () => ok(),
+    bash: (sh, args, stdin) => {
+      // Flags belong to bash only until the script name; everything after is the script's own arguments.
+      let i = 0
+      let xtrace = false
+      let syntaxOnly = false
+      let cmd: string | null = null
+      while (i < args.length && args[i].startsWith('-')) {
+        const a = args[i++]
+        if (a === '-c') { cmd = args[i++] ?? ''; break }
+        if (a.includes('x')) xtrace = true
+        if (a.includes('n')) syntaxOnly = true
+      }
+      const savedX = sh.opts.xtrace
+      if (xtrace) sh.opts.xtrace = true
+      try {
+        if (cmd !== null) return sh.execScript(cmd, args.slice(i), 'bash')
+        if (i >= args.length) return stdin ? sh.execScript(stdin) : fail('bash: an interactive sub-shell is not simulated. Run "bash script.sh" or "bash -c \'command\'".')
+        let content: string
+        try { content = sh.readFile(args[i]) } catch (e) { return fail(`bash: ${(e as Error).message}`, 127) }
+        if (syntaxOnly) return ok()
+        return sh.runScriptFile(sh.path(args[i]), content, args.slice(i + 1), stdin, args[i])
+      } finally { sh.opts.xtrace = savedX }
+    },
+    sh: (sh, args, stdin) => cmds.bash(sh, args, stdin),
     shift: (sh, args) => {
       const n = args[0] !== undefined ? Number(args[0]) : 1
       if (Number.isNaN(n) || n < 0) return fail(`bash: shift: ${args[0]}: shift count out of range`)

@@ -40,6 +40,7 @@ t('echo $(( 7 % 3 )) $(( 2 ** 10 )) $(( 1 ? 10 : 20 ))', '1 1024 10\n')
 // parameter expansion
 t('name=backup-2026-09-17.tar.gz; echo ${name%.tar.gz} ${name##*-} ${name/2026/YYYY}', 'backup-2026-09-17 17.tar.gz backup-YYYY-09-17.tar.gz\n')
 t('s=hello; echo ${s^^} ${s:1:3} ${s^}', 'HELLO ell Hello\n')
+t('x="a b"; y=$x; z=${x^^}; echo "$y|$z"', 'a b|A B\n')
 // here-docs
 t('cat <<EOF\nhi $USER\nline two\nEOF', 'hi learner\nline two\n')
 t("cat <<'EOF'\nno $USER expansion\nEOF", 'no $USER expansion\n')
@@ -63,6 +64,8 @@ t('./pf.sh', 'rc=1\n')
 script('cond.sh', '#!/bin/bash\nset -e\nif false; then echo no; fi\nfalse || echo recovered\n! false\necho end\n')
 t('./cond.sh', 'recovered\nend\n')
 t('echo after; echo $?', 'after\n0\n')
+script('andlist.sh', '#!/bin/bash\nset -e\nname=""\n[ -n "$name" ] && echo "has name"\necho "still here $0"\n')
+t('./andlist.sh', 'still here ./andlist.sh\n')
 // trap
 script('trap.sh', '#!/bin/bash\ntmp=$(mktemp -d)\ntrap \'rm -rf "$tmp"; echo cleaned\' EXIT\necho "$tmp" > tmpname\necho working\nexit 3\n')
 t('./trap.sh; echo rc=$?', 'working\ncleaned\nrc=3\n')
