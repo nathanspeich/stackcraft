@@ -10,7 +10,7 @@ const lesson: Lesson = {
   title: 'Arguments, getopts, usage, exit codes, functions',
   concept: `A script becomes a tool when it takes arguments and complains clearly when it gets them wrong.
 
-Positional arguments arrive as $1, $2, and so on; $# is how many there are. Flags like -u or -n NAME are parsed by getopts: it loops over the flags, sets a variable to each letter, and puts a flag's value in $OPTARG. A colon after a letter in the option string means that flag takes a value. After the loop, shift $((OPTIND - 1)) drops the flags so the rest are plain arguments.
+Positional arguments arrive as $1, $2, and so on; $# is how many there are. Flags like -u or -n NAME are parsed by getopts: it loops over the flags, sets a variable to each letter, and puts a flag's value in $OPTARG. A colon after a letter means that flag takes a value. After the loop, shift $((OPTIND - 1)) drops the flags so only plain arguments remain.
 
 A usage function prints how to call the script to stderr (>&2) and exits with 1. Exit 0 means success; anything else means failure, and other tools rely on that.
 
